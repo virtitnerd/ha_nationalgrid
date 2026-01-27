@@ -42,15 +42,9 @@ class NationalGridEntity(CoordinatorEntity[NationalGridDataUpdateCoordinator]):
             )
 
         meter: Meter = meter_data.meter
-        billing_account: BillingAccount = meter_data.billing_account
 
-        # Get service address for the device name
-        service_address = (
-            billing_account.get("serviceAddress", {}).get(
-                "serviceAddressCompressed", ""
-            )
-            or f"Meter {self._service_point_number}"
-        )
+        # Get meter number for the device name
+        meter_number = meter.get("meterNumber", "") or self._service_point_number
 
         # Determine meter model based on fuel type
         fuel_type = meter.get("fuelType", "")
@@ -58,7 +52,7 @@ class NationalGridEntity(CoordinatorEntity[NationalGridDataUpdateCoordinator]):
 
         return DeviceInfo(
             identifiers={(DOMAIN, self._service_point_number)},
-            name=service_address,
+            name=meter_number,
             manufacturer="National Grid",
             model=model,
             configuration_url="https://myaccount.nationalgrid.com",

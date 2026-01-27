@@ -1,4 +1,4 @@
-"""Custom types for integration_blueprint."""
+"""Custom types for nationalgrid."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ type IntegrationBlueprintConfigEntry = ConfigEntry[IntegrationBlueprintData]
 
 @dataclass
 class IntegrationBlueprintData:
-    """Data for the Blueprint integration."""
+    """Data for the National Grid integration."""
 
     client: IntegrationBlueprintApiClient
     coordinator: BlueprintDataUpdateCoordinator

@@ -1,4 +1,4 @@
-"""Sensor platform for integration_blueprint."""
+"""Sensor platform for nationalgrid."""
 
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ if TYPE_CHECKING:
 
 ENTITY_DESCRIPTIONS = (
     SensorEntityDescription(
-        key="integration_blueprint",
-        name="Integration Sensor",
+        key="nationalgrid",
+        name="National Grid Sensor",
         icon="mdi:format-quote-close",
     ),
 )
@@ -40,7 +40,7 @@ async def async_setup_entry(
 
 
 class IntegrationBlueprintSensor(IntegrationBlueprintEntity, SensorEntity):
-    """integration_blueprint Sensor class."""
+    """nationalgrid Sensor class."""
 
     def __init__(
         self,

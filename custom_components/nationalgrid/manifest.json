@@ -1,0 +1,12 @@
+{
+  "domain": "nationalgrid",
+  "name": "National Grid Integration",
+  "codeowners": [
+    "@ryanmorash"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/ryanmorash/ha_nationalgrid",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/ryanmorash/ha_nationalgrid/issues",
+  "version": "0.1.0"
+}

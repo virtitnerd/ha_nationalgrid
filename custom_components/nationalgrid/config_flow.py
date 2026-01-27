@@ -1,4 +1,4 @@
-"""Adds config flow for Blueprint."""
+"""Adds config flow for nationalgrid."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from .const import DOMAIN, LOGGER
 
 
 class BlueprintFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
-    """Config flow for Blueprint."""
+    """Config flow for nationalgrid."""
 
     VERSION = 1
 

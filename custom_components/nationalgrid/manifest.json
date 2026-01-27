@@ -1,11 +1,13 @@
 {
   "domain": "nationalgrid",
-  "name": "National Grid Integration",
+  "name": "National Grid",
   "codeowners": [
     "@ryanmorash"
   ],
+  "dependencies": ["aionatgrid"],
   "config_flow": true,
   "documentation": "https://github.com/ryanmorash/ha_nationalgrid",
+  "integration_type": "hub",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/ryanmorash/ha_nationalgrid/issues",
   "version": "0.1.0"

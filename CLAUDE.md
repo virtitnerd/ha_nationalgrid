@@ -25,7 +25,7 @@ The devcontainer is configured for VS Code with Python 3.13 and exposes Home Ass
 
 The integration follows the standard Home Assistant custom component pattern:
 
-- **`__init__.py`**: Entry setup with `async_setup_entry`/`async_unload_entry`. Configures the coordinator with 1-hour update interval and forwards to platforms (sensor, binary_sensor, switch).
+- **`__init__.py`**: Entry setup with `async_setup_entry`/`async_unload_entry`. Configures the coordinator with 1-hour update interval and forwards to platforms (sensor, binary_sensor).
 
 - **`api.py`**: `NationalGridApiClient` class handles HTTP communication via aiohttp. Currently points to jsonplaceholder.typicode.com as placeholder. Custom exceptions: `NationalGridApiClientError`, `NationalGridApiClientCommunicationError`, `NationalGridApiClientAuthenticationError`.
 
@@ -39,7 +39,7 @@ The integration follows the standard Home Assistant custom component pattern:
 
 - **`const.py`**: Domain (`nationalgrid`), logger, and attribution string.
 
-- **Platform files** (`sensor.py`, `binary_sensor.py`, `switch.py`): Each defines entity descriptions and entity classes inheriting from `NationalGridEntity`.
+- **Platform files** (`sensor.py`, `binary_sensor.py`): Each defines entity descriptions and entity classes inheriting from `NationalGridEntity`.
 
 ## Key Patterns
 
@@ -47,6 +47,10 @@ The integration follows the standard Home Assistant custom component pattern:
 - Runtime data stored in `entry.runtime_data` as `NationalGridData` dataclass
 - API client passed through runtime_data, coordinator fetches via `client.async_get_data()`
 - Uses `CoordinatorEntity` pattern for automatic state updates
+
+## Documentation Reference
+
+When looking up Home Assistant developer documentation, use Context7 with the library ID `/home-assistant/developers.home-assistant`.
 
 ## Code Style
 

@@ -27,6 +27,14 @@ def _get_last_stats(hass: HomeAssistant, statistic_id: str) -> dict[str, Any]:
     return get_last_statistics(hass, 1, statistic_id, convert_units=True, types={"sum"})
 
 
+def _is_valid_year_month(year: int, month: int) -> bool:
+    """Validate that year and month are reasonable values."""
+    min_year = 2000
+    max_year = 2100
+    max_month = 12
+    return min_year <= year <= max_year and 1 <= month <= max_month
+
+
 async def async_import_statistics(
     hass: HomeAssistant,
     coordinator: NationalGridDataUpdateCoordinator,
@@ -107,6 +115,11 @@ async def _import_usage_statistics(
 
         year = year_month // 100
         month = year_month % 100
+
+        # Validate year and month
+        if not _is_valid_year_month(year, month):
+            LOGGER.debug("Skipping invalid usage year_month value: %s", year_month)
+            continue
 
         # Create timestamp for start of month
         start_time = datetime(year, month, 1, tzinfo=UTC)
@@ -201,6 +214,11 @@ async def _import_cost_statistics(
 
         year = month_val // 100
         month = month_val % 100
+
+        # Validate year and month
+        if not _is_valid_year_month(year, month):
+            LOGGER.debug("Skipping invalid cost month value: %s", month_val)
+            continue
 
         # Create timestamp for start of month
         start_time = datetime(year, month, 1, tzinfo=UTC)

@@ -12,7 +12,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 
-from .const import DOMAIN
+from .const import DOMAIN, LOGGER
 from .entity import NationalGridEntity
 
 if TYPE_CHECKING:
@@ -44,6 +44,12 @@ def _get_energy_usage(
     """Get the latest energy usage for a meter."""
     fuel_type = meter_data.meter.get("fuelType")
     usage = coordinator.get_latest_usage(meter_data.account_id, fuel_type)
+    LOGGER.debug(
+        "Getting usage for account=%s, fuel_type=%s: %s",
+        meter_data.account_id,
+        fuel_type,
+        usage,
+    )
     if usage:
         return usage.get("usage")
     return None

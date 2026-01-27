@@ -26,7 +26,10 @@ if TYPE_CHECKING:
 
 # Unit constants
 UNIT_KWH = "kWh"
-UNIT_THERM = "therm"
+UNIT_CCF = "CCF"
+
+# Conversion factor: 1 therm = 1.038 CCF
+THERM_TO_CCF = 1.038
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -35,6 +38,7 @@ class NationalGridSensorEntityDescription(SensorEntityDescription):
 
     value_fn: Callable[[NationalGridDataUpdateCoordinator, MeterData], Any]
     unit_fn: Callable[[MeterData], str | None] | None = None
+    device_class_fn: Callable[[MeterData], SensorDeviceClass | None] | None = None
     available_fn: Callable[[MeterData], bool] = lambda _: True
 
 
@@ -51,7 +55,11 @@ def _get_energy_usage(
         usage,
     )
     if usage:
-        return usage.get("usage")
+        value = usage.get("usage")
+        if value is not None and fuel_type and fuel_type.upper() == "GAS":
+            # Convert therms to CCF
+            return round(value * THERM_TO_CCF, 2)
+        return value
     return None
 
 
@@ -85,18 +93,26 @@ def _get_energy_unit(meter_data: MeterData) -> str:
     """Get the appropriate energy unit based on fuel type."""
     fuel_type = meter_data.meter.get("fuelType", "").upper()
     if fuel_type == "GAS":
-        return UNIT_THERM
+        return UNIT_CCF
     return UNIT_KWH
+
+
+def _get_energy_device_class(meter_data: MeterData) -> SensorDeviceClass | None:
+    """Get the device class based on fuel type."""
+    fuel_type = meter_data.meter.get("fuelType", "").upper()
+    if fuel_type == "GAS":
+        return SensorDeviceClass.GAS
+    return SensorDeviceClass.ENERGY
 
 
 SENSOR_DESCRIPTIONS: tuple[NationalGridSensorEntityDescription, ...] = (
     NationalGridSensorEntityDescription(
         key="energy_usage",
         translation_key="energy_usage",
-        device_class=SensorDeviceClass.ENERGY,
         state_class=SensorStateClass.TOTAL,
         value_fn=_get_energy_usage,
         unit_fn=_get_energy_unit,
+        device_class_fn=_get_energy_device_class,
     ),
     NationalGridSensorEntityDescription(
         key="energy_cost",
@@ -165,6 +181,9 @@ class NationalGridSensor(NationalGridEntity, SensorEntity):
             self._attr_native_unit_of_measurement = entity_description.unit_fn(
                 meter_data
             )
+        # Set dynamic device class based on meter type
+        if entity_description.device_class_fn:
+            self._attr_device_class = entity_description.device_class_fn(meter_data)
 
     @property
     def native_value(self) -> Any:

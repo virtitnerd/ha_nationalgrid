@@ -118,12 +118,11 @@ class NationalGridDataUpdateCoordinator(
                     )
                     usages[account_id] = account_usages
                     LOGGER.debug(
-                        "Fetched %s usage records for account %s",
+                        "Fetched %s usage records for account %s, types: %s",
                         len(account_usages),
                         account_id,
+                        {u.get("usageType") for u in account_usages},
                     )
-                    if account_usages:
-                        LOGGER.debug("Sample usage: %s", account_usages[0])
                 except NationalGridApiClientError as err:
                     LOGGER.debug(
                         "Could not fetch energy usages for account %s: %s",
@@ -201,9 +200,21 @@ class NationalGridDataUpdateCoordinator(
             return None
 
         # Filter by fuel type if specified
+        # Map meter fuel type to usage type: Electric->KWH, Gas->THERMS
         filtered = account_usages
         if fuel_type:
-            filtered = [u for u in account_usages if u.get("usageType") == fuel_type]
+            usage_type_map = {
+                "Electric": "TOTAL_KWH",
+                "Gas": "THERMS",
+            }
+            usage_type = usage_type_map.get(fuel_type, fuel_type.upper())
+            filtered = [u for u in account_usages if u.get("usageType") == usage_type]
+            LOGGER.debug(
+                "Filtering usages: fuel_type=%s -> usage_type=%s, found %s matches",
+                fuel_type,
+                usage_type,
+                len(filtered),
+            )
 
         if not filtered:
             return None
@@ -222,9 +233,16 @@ class NationalGridDataUpdateCoordinator(
             return None
 
         # Filter by fuel type if specified
+        # Cost records use fuelType field which may be "ELECTRIC" or "GAS" (uppercase)
         filtered = account_costs
         if fuel_type:
-            filtered = [c for c in account_costs if c.get("fuelType") == fuel_type]
+            # Try exact match first, then uppercase match
+            filtered = [
+                c
+                for c in account_costs
+                if c.get("fuelType") == fuel_type
+                or c.get("fuelType") == fuel_type.upper()
+            ]
 
         if not filtered:
             return None

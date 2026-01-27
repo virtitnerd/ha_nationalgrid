@@ -11,6 +11,7 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
+from homeassistant.const import EntityCategory
 
 from .const import DOMAIN, LOGGER
 from .entity import NationalGridEntity
@@ -127,6 +128,7 @@ SENSOR_DESCRIPTIONS: tuple[NationalGridSensorEntityDescription, ...] = (
         translation_key="usage_period",
         value_fn=_get_usage_period,
         icon="mdi:calendar",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
 )
 

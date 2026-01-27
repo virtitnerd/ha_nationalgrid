@@ -9,17 +9,17 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.loader import Integration
 
-    from .api import IntegrationBlueprintApiClient
-    from .coordinator import BlueprintDataUpdateCoordinator
+    from .api import NationalGridApiClient
+    from .coordinator import NationalGridDataUpdateCoordinator
 
 
-type IntegrationBlueprintConfigEntry = ConfigEntry[IntegrationBlueprintData]
+type NationalGridConfigEntry = ConfigEntry[NationalGridData]
 
 
 @dataclass
-class IntegrationBlueprintData:
+class NationalGridData:
     """Data for the National Grid integration."""
 
-    client: IntegrationBlueprintApiClient
-    coordinator: BlueprintDataUpdateCoordinator
+    client: NationalGridApiClient
+    coordinator: NationalGridDataUpdateCoordinator
     integration: Integration

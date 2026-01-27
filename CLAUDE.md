@@ -27,24 +27,24 @@ The integration follows the standard Home Assistant custom component pattern:
 
 - **`__init__.py`**: Entry setup with `async_setup_entry`/`async_unload_entry`. Configures the coordinator with 1-hour update interval and forwards to platforms (sensor, binary_sensor, switch).
 
-- **`api.py`**: `IntegrationBlueprintApiClient` class handles HTTP communication via aiohttp. Currently points to jsonplaceholder.typicode.com as placeholder. Custom exceptions: `IntegrationBlueprintApiClientError`, `IntegrationBlueprintApiClientCommunicationError`, `IntegrationBlueprintApiClientAuthenticationError`.
+- **`api.py`**: `NationalGridApiClient` class handles HTTP communication via aiohttp. Currently points to jsonplaceholder.typicode.com as placeholder. Custom exceptions: `NationalGridApiClientError`, `NationalGridApiClientCommunicationError`, `NationalGridApiClientAuthenticationError`.
 
-- **`coordinator.py`**: `BlueprintDataUpdateCoordinator` extends Home Assistant's `DataUpdateCoordinator` for centralized data polling. Translates API exceptions to HA-specific ones (`ConfigEntryAuthFailed`, `UpdateFailed`).
+- **`coordinator.py`**: `NationalGridDataUpdateCoordinator` extends Home Assistant's `DataUpdateCoordinator` for centralized data polling. Translates API exceptions to HA-specific ones (`ConfigEntryAuthFailed`, `UpdateFailed`).
 
-- **`config_flow.py`**: `BlueprintFlowHandler` implements UI configuration. Collects username/password, validates credentials by calling the API, uses slugified username as unique_id.
+- **`config_flow.py`**: `NationalGridFlowHandler` implements UI configuration. Collects username/password, validates credentials by calling the API, uses slugified username as unique_id.
 
-- **`entity.py`**: `IntegrationBlueprintEntity` base class extends `CoordinatorEntity`. Sets up device info and unique_id from config entry.
+- **`entity.py`**: `NationalGridEntity` base class extends `CoordinatorEntity`. Sets up device info and unique_id from config entry.
 
-- **`data.py`**: `IntegrationBlueprintData` dataclass holds runtime data (client, coordinator, integration reference). `IntegrationBlueprintConfigEntry` type alias for typed config entries.
+- **`data.py`**: `NationalGridData` dataclass holds runtime data (client, coordinator, integration reference). `NationalGridConfigEntry` type alias for typed config entries.
 
 - **`const.py`**: Domain (`nationalgrid`), logger, and attribution string.
 
-- **Platform files** (`sensor.py`, `binary_sensor.py`, `switch.py`): Each defines entity descriptions and entity classes inheriting from `IntegrationBlueprintEntity`.
+- **Platform files** (`sensor.py`, `binary_sensor.py`, `switch.py`): Each defines entity descriptions and entity classes inheriting from `NationalGridEntity`.
 
 ## Key Patterns
 
-- All entities inherit from `IntegrationBlueprintEntity` which handles coordinator binding and device registration
-- Runtime data stored in `entry.runtime_data` as `IntegrationBlueprintData` dataclass
+- All entities inherit from `NationalGridEntity` which handles coordinator binding and device registration
+- Runtime data stored in `entry.runtime_data` as `NationalGridData` dataclass
 - API client passed through runtime_data, coordinator fetches via `client.async_get_data()`
 - Uses `CoordinatorEntity` pattern for automatic state updates
 

@@ -1,4 +1,4 @@
-"""Constants for integration_blueprint."""
+"""Constants for nationalgrid."""
 
 from logging import Logger, getLogger
 

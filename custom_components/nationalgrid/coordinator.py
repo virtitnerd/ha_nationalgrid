@@ -15,6 +15,16 @@ from .api import (
 )
 from .const import CONF_SELECTED_ACCOUNTS, LOGGER
 
+# Mapping of region abbreviations to company codes for the GraphQL API
+# Known company codes: NECO (New England), KEDNE (New York/KeySpan)
+REGION_TO_COMPANY_CODE: dict[str, str] = {
+    "MA": "NECO",
+    "RI": "NECO",
+    "NY": "KEDNE",
+    "NECO": "NECO",
+    "KEDNE": "KEDNE",
+}
+
 if TYPE_CHECKING:
     from aionatgrid.models import (
         BillingAccount,
@@ -111,15 +121,26 @@ class NationalGridDataUpdateCoordinator(
                 # Fetch energy costs
                 try:
                     region = billing_account.get("regionAbbreviation", "")
-                    account_costs = await client.async_get_energy_usage_costs(
-                        account_number=account_id,
-                        query_date=today,
-                        company_code=region,
-                    )
-                    costs[account_id] = account_costs
-                except NationalGridApiClientError:
+                    company_code = REGION_TO_COMPANY_CODE.get(region, region)
+                    if company_code:
+                        account_costs = await client.async_get_energy_usage_costs(
+                            account_number=account_id,
+                            query_date=today,
+                            company_code=company_code,
+                        )
+                        costs[account_id] = account_costs
+                    else:
+                        LOGGER.debug(
+                            "Unknown region %s for account %s, skipping costs",
+                            region,
+                            account_id,
+                        )
+                        costs[account_id] = []
+                except NationalGridApiClientError as err:
                     LOGGER.debug(
-                        "Could not fetch energy costs for account %s", account_id
+                        "Could not fetch energy costs for account %s: %s",
+                        account_id,
+                        err,
                     )
                     costs[account_id] = []
 

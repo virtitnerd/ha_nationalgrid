@@ -119,7 +119,7 @@ class NationalGridApiClient:
         except CannotConnectError as err:
             msg = f"Unable to connect to National Grid: {err}"
             raise NationalGridApiClientCommunicationError(msg) from err
-        except NationalGridError as err:
+        except (NationalGridError, ValueError) as err:
             msg = f"Error fetching energy usage costs: {err}"
             raise NationalGridApiClientError(msg) from err
 

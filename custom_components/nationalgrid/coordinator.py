@@ -73,11 +73,13 @@ class NationalGridDataUpdateCoordinator(
     async def _async_update_data(self) -> NationalGridCoordinatorData:
         """Update data via library."""
         try:
-            return await self._fetch_all_data()
+            data = await self._fetch_all_data()
         except NationalGridApiClientAuthenticationError as exception:
             raise ConfigEntryAuthFailed(exception) from exception
         except NationalGridApiClientError as exception:
             raise UpdateFailed(exception) from exception
+
+        return data
 
     async def _fetch_all_data(self) -> NationalGridCoordinatorData:
         """Fetch all data from the API."""
@@ -371,17 +373,3 @@ class NationalGridDataUpdateCoordinator(
         if not readings:
             return None
         return max(readings, key=lambda r: r.get("date", ""))
-
-    def get_ami_daily_total(self, service_point_number: str) -> float | None:
-        """Get the total usage for the most recent AMI day."""
-        latest = self.get_latest_ami_usage(service_point_number)
-        if latest is None:
-            return None
-        latest_date = latest.get("date", "")
-        if not latest_date:
-            return None
-        readings = (
-            self.data.ami_usages.get(service_point_number, []) if self.data else []
-        )
-        day_readings = [r for r in readings if r.get("date") == latest_date]
-        return round(sum(r.get("quantity", 0) for r in day_readings), 2)

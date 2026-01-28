@@ -36,19 +36,13 @@
     "entity": {
         "sensor": {
             "energy_usage": {
-                "name": "Energy Usage"
+                "name": "Last Billing Usage"
             },
             "energy_cost": {
-                "name": "Energy Cost"
-            },
-            "usage_period": {
-                "name": "Usage Period"
-            },
-            "ami_daily_usage": {
-                "name": "AMI Daily Usage"
+                "name": "Last Billing Cost"
             },
             "ami_latest_reading": {
-                "name": "AMI Latest Reading"
+                "name": "Hourly Usage"
             }
         },
         "binary_sensor": {

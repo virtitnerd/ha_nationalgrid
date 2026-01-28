@@ -11,7 +11,6 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import EntityCategory
 
 from .const import DOMAIN, LOGGER
 from .entity import NationalGridEntity
@@ -75,25 +74,6 @@ def _get_energy_cost(
     return None
 
 
-def _get_usage_period(
-    coordinator: NationalGridDataUpdateCoordinator, meter_data: MeterData
-) -> str | None:
-    """Get the usage period as a string."""
-    fuel_type = meter_data.meter.get("fuelType")
-    usage = coordinator.get_latest_usage(meter_data.account_id, fuel_type)
-    if usage:
-        year_month = usage.get("usageYearMonth", 0)
-        if year_month:
-            year = year_month // 100
-            month = year_month % 100
-            min_year = 2000
-            max_year = 2100
-            max_month = 12
-            if min_year <= year <= max_year and 1 <= month <= max_month:
-                return f"{year}-{month:02d}"
-    return None
-
-
 def _get_energy_unit(meter_data: MeterData) -> str:
     """Get the appropriate energy unit based on fuel type."""
     fuel_type = meter_data.meter.get("fuelType", "").upper()
@@ -105,14 +85,6 @@ def _get_energy_unit(meter_data: MeterData) -> str:
 def _has_ami_smart_meter(meter_data: MeterData) -> bool:
     """Check if a meter has AMI smart meter capability."""
     return bool(meter_data.meter.get("hasAmiSmartMeter"))
-
-
-def _get_ami_daily_usage(
-    coordinator: NationalGridDataUpdateCoordinator, meter_data: MeterData
-) -> float | None:
-    """Get the total AMI daily usage for the most recent day."""
-    service_point = str(meter_data.meter.get("servicePointNumber", ""))
-    return coordinator.get_ami_daily_total(service_point)
 
 
 def _get_ami_latest_reading(
@@ -138,6 +110,7 @@ SENSOR_DESCRIPTIONS: tuple[NationalGridSensorEntityDescription, ...] = (
     NationalGridSensorEntityDescription(
         key="energy_usage",
         translation_key="energy_usage",
+        name="Last Billing Usage",
         value_fn=_get_energy_usage,
         unit_fn=_get_energy_unit,
         device_class_fn=_get_energy_device_class,
@@ -145,29 +118,15 @@ SENSOR_DESCRIPTIONS: tuple[NationalGridSensorEntityDescription, ...] = (
     NationalGridSensorEntityDescription(
         key="energy_cost",
         translation_key="energy_cost",
+        name="Last Billing Cost",
         native_unit_of_measurement="$",
         device_class=SensorDeviceClass.MONETARY,
         value_fn=_get_energy_cost,
     ),
     NationalGridSensorEntityDescription(
-        key="usage_period",
-        translation_key="usage_period",
-        value_fn=_get_usage_period,
-        icon="mdi:calendar",
-        entity_category=EntityCategory.DIAGNOSTIC,
-    ),
-    NationalGridSensorEntityDescription(
-        key="ami_daily_usage",
-        translation_key="ami_daily_usage",
-        state_class=SensorStateClass.TOTAL,
-        value_fn=_get_ami_daily_usage,
-        unit_fn=_get_energy_unit,
-        device_class_fn=_get_energy_device_class,
-        available_fn=_has_ami_smart_meter,
-    ),
-    NationalGridSensorEntityDescription(
         key="ami_latest_reading",
         translation_key="ami_latest_reading",
+        name="Hourly Usage",
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=_get_ami_latest_reading,
         unit_fn=_get_energy_unit,

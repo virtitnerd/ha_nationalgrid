@@ -10,11 +10,9 @@ from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.models import StatisticData, StatisticMetaData
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
-    async_import_statistics,
     get_last_statistics,
 )
 from homeassistant.const import UnitOfEnergy, UnitOfVolume
-from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, LOGGER
 
@@ -33,8 +31,6 @@ async def async_import_all_statistics(
     if data is None:
         return
 
-    registry = er.async_get(hass)
-
     for sp, ami_readings in data.ami_usages.items():
         meter_data = data.meters.get(sp)
         if meter_data is None:
@@ -42,8 +38,8 @@ async def async_import_all_statistics(
         fuel_type = str(meter_data.meter.get("fuelType", ""))
         is_gas = fuel_type == "Gas"
 
-        # Import hourly AMI stats into the sensor entity's statistics
-        await _import_hourly_stats(hass, registry, sp, ami_readings, is_gas=is_gas)
+        # Import hourly AMI stats as external statistics
+        await _import_hourly_stats(hass, sp, ami_readings, is_gas=is_gas)
 
     # Import interval read stats (electric only)
     for sp, reads in data.interval_reads.items():
@@ -52,23 +48,13 @@ async def async_import_all_statistics(
 
 async def _import_hourly_stats(
     hass: HomeAssistant,
-    registry: er.EntityRegistry,
     service_point: str,
     readings: list,
     *,
     is_gas: bool,
 ) -> None:
-    """Import hourly AMI usage statistics into the sensor entity."""
-    unique_id = f"{DOMAIN}_{service_point}_ami_latest_reading"
-    entry = registry.async_get_entity_id("sensor", DOMAIN, unique_id)
-    if entry is None:
-        LOGGER.debug(
-            "No sensor entity found for unique_id %s, skipping hourly stats",
-            unique_id,
-        )
-        return
-
-    statistic_id = entry  # entity_id is the statistic_id for entity stats
+    """Import hourly AMI usage statistics as external statistics."""
+    statistic_id = f"{DOMAIN}:{service_point}_hourly_usage"
     unit = UnitOfVolume.CUBIC_FEET if is_gas else UnitOfEnergy.KILO_WATT_HOUR
 
     # Get last imported sum to continue cumulative total
@@ -130,12 +116,12 @@ async def _import_hourly_stats(
         has_mean=False,
         has_sum=True,
         name=f"{service_point} Hourly Usage",
-        source="recorder",
+        source=DOMAIN,
         statistic_id=statistic_id,
         unit_of_measurement=unit,
     )
 
-    async_import_statistics(hass, metadata, stats)
+    async_add_external_statistics(hass, metadata, stats)
     LOGGER.debug(
         "Imported %s hourly stats for %s (sum=%.3f)",
         len(stats),

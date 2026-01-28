@@ -9,7 +9,6 @@ from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
-    SensorStateClass,
 )
 
 from .const import DOMAIN, LOGGER
@@ -82,22 +81,6 @@ def _get_energy_unit(meter_data: MeterData) -> str:
     return UNIT_KWH
 
 
-def _has_ami_smart_meter(meter_data: MeterData) -> bool:
-    """Check if a meter has AMI smart meter capability."""
-    return bool(meter_data.meter.get("hasAmiSmartMeter"))
-
-
-def _get_ami_latest_reading(
-    coordinator: NationalGridDataUpdateCoordinator, meter_data: MeterData
-) -> float | None:
-    """Get the most recent AMI reading value."""
-    service_point = str(meter_data.meter.get("servicePointNumber", ""))
-    reading = coordinator.get_latest_ami_usage(service_point)
-    if reading is None:
-        return None
-    return reading.get("quantity")
-
-
 def _get_energy_device_class(meter_data: MeterData) -> SensorDeviceClass | None:
     """Get the device class based on fuel type."""
     fuel_type = meter_data.meter.get("fuelType", "").upper()
@@ -122,16 +105,6 @@ SENSOR_DESCRIPTIONS: tuple[NationalGridSensorEntityDescription, ...] = (
         native_unit_of_measurement="$",
         device_class=SensorDeviceClass.MONETARY,
         value_fn=_get_energy_cost,
-    ),
-    NationalGridSensorEntityDescription(
-        key="ami_latest_reading",
-        translation_key="ami_latest_reading",
-        name="Hourly Usage",
-        state_class=SensorStateClass.TOTAL,
-        value_fn=_get_ami_latest_reading,
-        unit_fn=_get_energy_unit,
-        device_class_fn=_get_energy_device_class,
-        available_fn=_has_ami_smart_meter,
     ),
 )
 

@@ -55,10 +55,8 @@ async def async_setup_entry(
 
     try:
         await coordinator.async_config_entry_first_refresh()
-        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
-        # Import statistics after platforms are set up (sensor entities must exist)
         await async_import_all_statistics(hass, coordinator)
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
         # Re-import statistics on each coordinator update
         async def _on_update() -> None:

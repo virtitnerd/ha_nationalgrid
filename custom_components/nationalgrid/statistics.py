@@ -12,7 +12,7 @@ from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
     get_last_statistics,
 )
-from homeassistant.const import UnitOfEnergy, UnitOfVolume
+from homeassistant.const import UnitOfEnergy
 
 from .const import DOMAIN, LOGGER
 
@@ -55,7 +55,7 @@ async def _import_hourly_stats(
 ) -> None:
     """Import hourly AMI usage statistics as external statistics."""
     statistic_id = f"{DOMAIN}:{service_point}_hourly_usage"
-    unit = UnitOfVolume.CUBIC_FEET if is_gas else UnitOfEnergy.KILO_WATT_HOUR
+    unit = "CCF" if is_gas else UnitOfEnergy.KILO_WATT_HOUR
 
     # Get last imported sum to continue cumulative total
     last = await get_instance(hass).async_add_executor_job(

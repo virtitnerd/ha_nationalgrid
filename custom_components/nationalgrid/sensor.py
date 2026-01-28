@@ -138,7 +138,6 @@ SENSOR_DESCRIPTIONS: tuple[NationalGridSensorEntityDescription, ...] = (
     NationalGridSensorEntityDescription(
         key="energy_usage",
         translation_key="energy_usage",
-        state_class=SensorStateClass.TOTAL,
         value_fn=_get_energy_usage,
         unit_fn=_get_energy_unit,
         device_class_fn=_get_energy_device_class,
@@ -148,7 +147,6 @@ SENSOR_DESCRIPTIONS: tuple[NationalGridSensorEntityDescription, ...] = (
         translation_key="energy_cost",
         native_unit_of_measurement="$",
         device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.TOTAL,
         value_fn=_get_energy_cost,
     ),
     NationalGridSensorEntityDescription(

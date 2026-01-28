@@ -10,6 +10,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import (
+    AmiMeterIdentifier,
     NationalGridApiClient,
     NationalGridApiClientAuthenticationError,
     NationalGridApiClientError,
@@ -90,27 +91,15 @@ class NationalGridDataUpdateCoordinator(
         self._last_update_success = True
         return data
 
-    async def _fetch_all_data(self) -> NationalGridCoordinatorData:  # noqa: PLR0915
+    async def _fetch_all_data(self) -> NationalGridCoordinatorData:
         """Fetch all data from the API."""
-        client = self.client
         selected_accounts: list[str] = self.config_entry.data.get(
             CONF_SELECTED_ACCOUNTS, []
         )
-
         _LOGGER.debug("Fetching data for accounts: %s", selected_accounts)
 
         # Seed from previous data to preserve stale data on per-account errors.
-        prev = self.data
-        accounts: dict[str, BillingAccount] = dict(prev.accounts) if prev else {}
-        meters: dict[str, MeterData] = dict(prev.meters) if prev else {}
-        usages: dict[str, list[EnergyUsage]] = dict(prev.usages) if prev else {}
-        costs: dict[str, list[EnergyUsageCost]] = dict(prev.costs) if prev else {}
-        ami_usages: dict[str, list[AmiEnergyUsage]] = (
-            dict(prev.ami_usages) if prev else {}
-        )
-        interval_reads: dict[str, list[IntervalRead]] = (
-            dict(prev.interval_reads) if prev else {}
-        )
+        data = self._seed_from_previous()
 
         # Calculate from_month for usage query (12 months back).
         today = datetime.now(tz=UTC).date()
@@ -119,92 +108,7 @@ class NationalGridDataUpdateCoordinator(
 
         for account_id in selected_accounts:
             try:
-                # Fetch billing account info.
-                _LOGGER.debug("Fetching billing account: %s", account_id)
-                billing_account = await client.async_get_billing_account(account_id)
-                accounts[account_id] = billing_account
-                _LOGGER.debug(
-                    "Billing account %s: region=%s, meters=%s",
-                    account_id,
-                    billing_account.get("region"),
-                    len(billing_account.get("meter", {}).get("nodes", [])),
-                )
-
-                # Extract meters from the billing account.
-                meter_nodes = billing_account.get("meter", {}).get("nodes", [])
-                for meter in meter_nodes:
-                    service_point = str(meter.get("servicePointNumber", ""))
-                    if service_point:
-                        meters[service_point] = MeterData(
-                            meter=meter,
-                            account_id=account_id,
-                            billing_account=billing_account,
-                        )
-                        _LOGGER.debug(
-                            "Found meter: service_point=%s, fuel_type=%s",
-                            service_point,
-                            meter.get("fuelType"),
-                        )
-
-                # Fetch energy usages.
-                try:
-                    account_usages = await client.async_get_energy_usages(
-                        account_number=account_id,
-                        from_month=from_month,
-                        first=12,
-                    )
-                    usages[account_id] = account_usages
-                    _LOGGER.debug(
-                        "Fetched %s usage records for account %s, types: %s",
-                        len(account_usages),
-                        account_id,
-                        {u.get("usageType") for u in account_usages},
-                    )
-                except NationalGridApiClientError as err:
-                    _LOGGER.debug(
-                        "Could not fetch energy usages for account %s: %s",
-                        account_id,
-                        err,
-                    )
-                    usages[account_id] = []
-
-                # Fetch energy costs (company_code is the region from billing account).
-                try:
-                    region = billing_account.get("region", "")
-                    if region:
-                        account_costs = await client.async_get_energy_usage_costs(
-                            account_number=account_id,
-                            query_date=today,
-                            company_code=region,
-                        )
-                        costs[account_id] = account_costs
-                        _LOGGER.debug(
-                            "Fetched %s cost records for account %s",
-                            len(account_costs),
-                            account_id,
-                        )
-                    else:
-                        _LOGGER.debug(
-                            "No region for account %s, skipping costs", account_id
-                        )
-                        costs[account_id] = []
-                except NationalGridApiClientError as err:
-                    _LOGGER.debug(
-                        "Could not fetch energy costs for account %s: %s",
-                        account_id,
-                        err,
-                    )
-                    costs[account_id] = []
-
-                # Fetch AMI energy usages for AMI-capable meters.
-                await self._fetch_ami_data(
-                    billing_account,
-                    meter_nodes,
-                    today,
-                    ami_usages,
-                    interval_reads,
-                )
-
+                await self._fetch_account_data(account_id, today, from_month, data)
             except NationalGridApiClientAuthenticationError:
                 # Re-raise auth errors to trigger reauth flow.
                 raise
@@ -217,22 +121,141 @@ class NationalGridDataUpdateCoordinator(
         _LOGGER.debug(
             "Fetch complete: %s accounts, %s meters, %s usage records, "
             "%s cost records, %s AMI usage records, %s interval reads",
-            len(accounts),
-            len(meters),
-            sum(len(u) for u in usages.values()),
-            sum(len(c) for c in costs.values()),
-            sum(len(a) for a in ami_usages.values()),
-            sum(len(r) for r in interval_reads.values()),
+            len(data.accounts),
+            len(data.meters),
+            sum(len(u) for u in data.usages.values()),
+            sum(len(c) for c in data.costs.values()),
+            sum(len(a) for a in data.ami_usages.values()),
+            sum(len(r) for r in data.interval_reads.values()),
         )
 
+        return data
+
+    def _seed_from_previous(self) -> NationalGridCoordinatorData:
+        """Create coordinator data seeded from previous fetch results."""
+        prev = self.data
+        if prev is None:
+            return NationalGridCoordinatorData(accounts={})
         return NationalGridCoordinatorData(
-            accounts=accounts,
-            meters=meters,
-            usages=usages,
-            costs=costs,
-            ami_usages=ami_usages,
-            interval_reads=interval_reads,
+            accounts=dict(prev.accounts),
+            ami_usages=dict(prev.ami_usages),
+            costs=dict(prev.costs),
+            interval_reads=dict(prev.interval_reads),
+            meters=dict(prev.meters),
+            usages=dict(prev.usages),
         )
+
+    async def _fetch_account_data(
+        self,
+        account_id: str,
+        today: date,
+        from_month: int,
+        data: NationalGridCoordinatorData,
+    ) -> None:
+        """Fetch billing, usage, cost, and AMI data for a single account."""
+        client = self.client
+
+        # Fetch billing account info.
+        _LOGGER.debug("Fetching billing account: %s", account_id)
+        billing_account = await client.async_get_billing_account(account_id)
+        data.accounts[account_id] = billing_account
+        _LOGGER.debug(
+            "Billing account %s: region=%s, meters=%s",
+            account_id,
+            billing_account.get("region"),
+            len(billing_account.get("meter", {}).get("nodes", [])),
+        )
+
+        # Extract meters from the billing account.
+        meter_nodes = billing_account.get("meter", {}).get("nodes", [])
+        for meter in meter_nodes:
+            service_point = str(meter.get("servicePointNumber", ""))
+            if service_point:
+                data.meters[service_point] = MeterData(
+                    meter=meter,
+                    account_id=account_id,
+                    billing_account=billing_account,
+                )
+                _LOGGER.debug(
+                    "Found meter: service_point=%s, fuel_type=%s",
+                    service_point,
+                    meter.get("fuelType"),
+                )
+
+        # Fetch energy usages.
+        data.usages[account_id] = await self._fetch_usages(account_id, from_month)
+
+        # Fetch energy costs (company_code is the region from billing account).
+        data.costs[account_id] = await self._fetch_costs(
+            account_id, today, billing_account
+        )
+
+        # Fetch AMI energy usages for AMI-capable meters.
+        await self._fetch_ami_data(
+            billing_account,
+            meter_nodes,
+            today,
+            data.ami_usages,
+            data.interval_reads,
+        )
+
+    async def _fetch_usages(
+        self, account_id: str, from_month: int
+    ) -> list[EnergyUsage]:
+        """Fetch energy usages for an account, returning empty list on error."""
+        try:
+            account_usages = await self.client.async_get_energy_usages(
+                account_number=account_id,
+                from_month=from_month,
+                first=12,
+            )
+            _LOGGER.debug(
+                "Fetched %s usage records for account %s, types: %s",
+                len(account_usages),
+                account_id,
+                {u.get("usageType") for u in account_usages},
+            )
+        except NationalGridApiClientError as err:
+            _LOGGER.debug(
+                "Could not fetch energy usages for account %s: %s",
+                account_id,
+                err,
+            )
+            return []
+        else:
+            return account_usages
+
+    async def _fetch_costs(
+        self,
+        account_id: str,
+        today: date,
+        billing_account: BillingAccount,
+    ) -> list[EnergyUsageCost]:
+        """Fetch energy costs for an account, returning empty list on error."""
+        try:
+            region = billing_account.get("region", "")
+            if not region:
+                _LOGGER.debug("No region for account %s, skipping costs", account_id)
+                return []
+            account_costs = await self.client.async_get_energy_usage_costs(
+                account_number=account_id,
+                query_date=today,
+                company_code=region,
+            )
+            _LOGGER.debug(
+                "Fetched %s cost records for account %s",
+                len(account_costs),
+                account_id,
+            )
+        except NationalGridApiClientError as err:
+            _LOGGER.debug(
+                "Could not fetch energy costs for account %s: %s",
+                account_id,
+                err,
+            )
+            return []
+        else:
+            return account_costs
 
     async def _fetch_ami_data(
         self,
@@ -254,11 +277,14 @@ class NationalGridDataUpdateCoordinator(
             try:
                 date_to = today - timedelta(days=3)
                 date_from = today - timedelta(days=10)
-                ami_data = await client.async_get_ami_energy_usages(
+                ami_meter = AmiMeterIdentifier(
                     meter_number=str(meter.get("meterNumber", "")),
                     premise_number=premise_number,
                     service_point_number=sp,
                     meter_point_number=str(meter.get("meterPointNumber", "")),
+                )
+                ami_data = await client.async_get_ami_energy_usages(
+                    meter=ami_meter,
                     date_from=date_from,
                     date_to=date_to,
                 )

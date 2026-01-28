@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import AsyncExitStack
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from aionatgrid import NationalGridClient, NationalGridConfig
@@ -25,6 +26,16 @@ if TYPE_CHECKING:
         EnergyUsageCost,
         IntervalRead,
     )
+
+
+@dataclass(frozen=True)
+class AmiMeterIdentifier:
+    """Identify an AMI smart meter for data queries."""
+
+    meter_number: str
+    premise_number: str
+    service_point_number: str
+    meter_point_number: str
 
 
 class NationalGridApiClientError(Exception):
@@ -166,12 +177,9 @@ class NationalGridApiClient:
             msg = f"Error fetching interval reads: {err}"
             raise NationalGridApiClientError(msg) from err
 
-    async def async_get_ami_energy_usages(  # noqa: PLR0913
+    async def async_get_ami_energy_usages(
         self,
-        meter_number: str,
-        premise_number: str,
-        service_point_number: str,
-        meter_point_number: str,
+        meter: AmiMeterIdentifier,
         date_from: date,
         date_to: date,
     ) -> list[AmiEnergyUsage]:
@@ -179,10 +187,10 @@ class NationalGridApiClient:
         await self.async_init()
         try:
             return await self._client.get_ami_energy_usages(
-                meter_number=meter_number,
-                premise_number=premise_number,
-                service_point_number=service_point_number,
-                meter_point_number=meter_point_number,
+                meter_number=meter.meter_number,
+                premise_number=meter.premise_number,
+                service_point_number=meter.service_point_number,
+                meter_point_number=meter.meter_point_number,
                 date_from=date_from,
                 date_to=date_to,
             )

@@ -13,6 +13,7 @@ from aionatgrid.exceptions import (
 )
 
 from custom_components.nationalgrid.api import (
+    AmiMeterIdentifier,
     NationalGridApiClient,
     NationalGridApiClientAuthenticationError,
     NationalGridApiClientCommunicationError,
@@ -36,6 +37,14 @@ def mock_ng_client():
 
 def _make_api_client() -> NationalGridApiClient:
     return NationalGridApiClient(username="user", password="pass")
+
+
+MOCK_AMI_METER = AmiMeterIdentifier(
+    meter_number="MTR1",
+    premise_number="PREM1",
+    service_point_number="SP1",
+    meter_point_number="MPT1",
+)
 
 
 async def test_async_get_linked_accounts(mock_ng_client) -> None:
@@ -111,10 +120,7 @@ async def test_async_get_ami_energy_usages(mock_ng_client) -> None:
     mock_ng_client.get_ami_energy_usages = AsyncMock(return_value=[{"usage": 10}])
     client = _make_api_client()
     result = await client.async_get_ami_energy_usages(
-        meter_number="MTR1",
-        premise_number="PREM1",
-        service_point_number="SP1",
-        meter_point_number="MPT1",
+        meter=MOCK_AMI_METER,
         date_from=date(2025, 1, 1),
         date_to=date(2025, 1, 2),
     )
@@ -247,10 +253,7 @@ async def test_async_get_ami_energy_usages_auth_error(mock_ng_client) -> None:
     client = _make_api_client()
     with pytest.raises(NationalGridApiClientAuthenticationError):
         await client.async_get_ami_energy_usages(
-            meter_number="MTR1",
-            premise_number="PREM1",
-            service_point_number="SP1",
-            meter_point_number="MPT1",
+            meter=MOCK_AMI_METER,
             date_from=date(2025, 1, 1),
             date_to=date(2025, 1, 2),
         )
@@ -264,10 +267,7 @@ async def test_async_get_ami_energy_usages_communication_error(mock_ng_client) -
     client = _make_api_client()
     with pytest.raises(NationalGridApiClientCommunicationError):
         await client.async_get_ami_energy_usages(
-            meter_number="MTR1",
-            premise_number="PREM1",
-            service_point_number="SP1",
-            meter_point_number="MPT1",
+            meter=MOCK_AMI_METER,
             date_from=date(2025, 1, 1),
             date_to=date(2025, 1, 2),
         )
@@ -281,10 +281,7 @@ async def test_async_get_ami_energy_usages_generic_error(mock_ng_client) -> None
     client = _make_api_client()
     with pytest.raises(NationalGridApiClientError):
         await client.async_get_ami_energy_usages(
-            meter_number="MTR1",
-            premise_number="PREM1",
-            service_point_number="SP1",
-            meter_point_number="MPT1",
+            meter=MOCK_AMI_METER,
             date_from=date(2025, 1, 1),
             date_to=date(2025, 1, 2),
         )

@@ -1,4 +1,20 @@
-"""Import AMI energy data into Home Assistant long-term statistics."""
+"""
+Import AMI energy data into Home Assistant long-term statistics.
+
+Creates two external statistic series per electric meter and one per gas meter:
+
+- ``nationalgrid:{service_point}_hourly_usage`` — daily AMI readings (electric kWh,
+  gas CCF converted from therms) imported as hourly statistics.
+- ``nationalgrid:{service_point}_interval_usage`` — 15-minute interval reads
+  (electric only, kWh) bucketed into hourly totals.
+
+Statistics are imported incrementally: on each coordinator update, only readings
+newer than the last imported timestamp are appended. Cumulative sums are carried
+forward from the previous import.
+
+Note: HA long-term statistics require top-of-hour timestamps. AMI timestamps are
+truncated to the hour, and interval reads are aggregated into hourly buckets.
+"""
 
 from __future__ import annotations
 
@@ -26,7 +42,13 @@ async def async_import_all_statistics(
     hass: HomeAssistant,
     coordinator: NationalGridDataUpdateCoordinator,
 ) -> None:
-    """Import AMI hourly and interval read statistics."""
+    """
+    Import AMI hourly and interval read statistics.
+
+    Called after the first coordinator refresh and on each subsequent update.
+    Iterates all AMI meters and electric interval reads, delegating to the
+    appropriate import function for each.
+    """
     data = coordinator.data
     if data is None:
         return
@@ -53,7 +75,13 @@ async def _import_hourly_stats(
     *,
     is_gas: bool,
 ) -> None:
-    """Import hourly AMI usage statistics as external statistics."""
+    """
+    Import hourly AMI usage statistics as external statistics.
+
+    Each AMI reading has a date and quantity (in therms for gas, kWh for electric).
+    Gas quantities are converted to CCF. Readings are sorted chronologically and
+    only those newer than the last imported statistic are appended.
+    """
     statistic_id = f"{DOMAIN}:{service_point}_hourly_usage"
     unit = "CCF" if is_gas else UnitOfEnergy.KILO_WATT_HOUR
 
@@ -136,7 +164,13 @@ async def _import_interval_stats(
     service_point: str,
     reads: list,
 ) -> None:
-    """Import 15-minute interval read statistics for a service point."""
+    """
+    Import 15-minute interval read statistics for a service point.
+
+    Interval reads arrive at 15-minute granularity but HA statistics require
+    hourly timestamps. Reads are aggregated (summed) into hourly buckets before
+    import. Only available for electric meters.
+    """
     statistic_id = f"{DOMAIN}:{service_point}_interval_usage"
 
     last = await get_instance(hass).async_add_executor_job(

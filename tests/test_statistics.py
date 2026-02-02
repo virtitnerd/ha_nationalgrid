@@ -17,8 +17,17 @@ def _make_coordinator_data(
     ami_usages: dict | None = None,
     interval_reads: dict | None = None,
     meters: dict | None = None,
+    is_first_refresh: bool = True,
 ) -> NationalGridCoordinatorData:
-    """Build mock coordinator data."""
+    """Build mock coordinator data.
+    
+    Args:
+        ami_usages: AMI usage data by service point
+        interval_reads: Interval read data by service point
+        meters: Meter data by service point
+        is_first_refresh: Whether this is the first refresh (imports all data)
+                          or incremental (applies 48h cutoff)
+    """
     return NationalGridCoordinatorData(
         accounts={"acct1": {"billingAccountId": "acct1"}},
         meters=meters or {},
@@ -26,6 +35,7 @@ def _make_coordinator_data(
         costs={},
         ami_usages=ami_usages or {},
         interval_reads=interval_reads or {},
+        is_first_refresh=is_first_refresh,
     )
 
 
@@ -272,3 +282,103 @@ async def test_import_all_statistics_skips_missing_meter(hass) -> None:
     )
     # Should not raise
     await async_import_all_statistics(hass, coordinator)
+
+
+@patch("custom_components.national_grid.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid.statistics.get_instance")
+async def test_import_hourly_stats_48h_cutoff_on_incremental(
+    mock_get_instance, mock_add_stats, hass
+) -> None:
+    """Test that 48-hour cutoff is applied on incremental updates (not first refresh)."""
+    from datetime import UTC, datetime, timedelta
+    
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
+
+    # Create readings: one recent (within 48h) and one old (outside 48h)
+    now = datetime.now(tz=UTC)
+    recent_time = (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:00:00.000Z")
+    old_time = (now - timedelta(hours=72)).strftime("%Y-%m-%dT%H:00:00.000Z")
+    
+    readings = [
+        {"date": old_time, "quantity": 5.0},  # Should be skipped (>48h old)
+        {"date": recent_time, "quantity": 3.0},  # Should be included
+    ]
+    coordinator = MagicMock()
+    coordinator.data = _make_coordinator_data(
+        ami_usages={"SP1": readings},
+        meters={"SP1": _make_meter_data("Electric")},
+        is_first_refresh=False,  # Incremental update - apply 48h cutoff
+    )
+
+    await async_import_all_statistics(hass, coordinator)
+    
+    # Should have been called with only the recent reading
+    assert mock_add_stats.called
+    stats = mock_add_stats.call_args[0][2]
+    assert len(stats) == 1
+    assert stats[0]["state"] == 3.0  # Only the recent reading
+
+
+@patch("custom_components.national_grid.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid.statistics.get_instance")
+async def test_import_interval_stats_with_return_values(
+    mock_get_instance, mock_add_stats, hass
+) -> None:
+    """Test interval stats creates separate consumption and return statistics when negative values exist."""
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
+
+    # Create interval reads with both positive (consumption) and negative (return/solar) values
+    reads = [
+        {"startTime": "2025-01-15T10:00:00", "value": 0.5},   # Consumption
+        {"startTime": "2025-01-15T10:15:00", "value": 0.3},   # Consumption
+        {"startTime": "2025-01-15T11:00:00", "value": -0.4},  # Return (solar)
+        {"startTime": "2025-01-15T11:15:00", "value": -0.2},  # Return (solar)
+        {"startTime": "2025-01-15T12:00:00", "value": 0.6},   # Consumption
+    ]
+    coordinator = MagicMock()
+    coordinator.data = _make_coordinator_data(
+        interval_reads={"SP1": reads},
+        is_first_refresh=True,
+    )
+
+    await async_import_all_statistics(hass, coordinator)
+    
+    # Should be called twice - once for consumption, once for return
+    assert mock_add_stats.call_count == 2
+    
+    # Check that both statistics were created with correct IDs
+    call_args = [call[0] for call in mock_add_stats.call_args_list]
+    statistic_ids = [args[1]["statistic_id"] for args in call_args]
+    
+    assert "national_grid:SP1_electric_interval_usage" in statistic_ids
+    assert "national_grid:SP1_electric_interval_return_usage" in statistic_ids
+
+
+@patch("custom_components.national_grid.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid.statistics.get_instance")
+async def test_import_interval_stats_no_return_when_no_negative(
+    mock_get_instance, mock_add_stats, hass
+) -> None:
+    """Test interval stats only creates consumption statistic when no negative values exist."""
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
+
+    # Create interval reads with only positive values (no solar)
+    reads = [
+        {"startTime": "2025-01-15T10:00:00", "value": 0.5},
+        {"startTime": "2025-01-15T10:15:00", "value": 0.3},
+        {"startTime": "2025-01-15T11:00:00", "value": 0.4},
+    ]
+    coordinator = MagicMock()
+    coordinator.data = _make_coordinator_data(
+        interval_reads={"SP1": reads},
+        is_first_refresh=True,
+    )
+
+    await async_import_all_statistics(hass, coordinator)
+    
+    # Should only be called once (consumption only, no return)
+    assert mock_add_stats.call_count == 1
+    
+    # Verify it's the consumption statistic
+    metadata = mock_add_stats.call_args[0][1]
+    assert metadata["statistic_id"] == "national_grid:SP1_electric_interval_usage"

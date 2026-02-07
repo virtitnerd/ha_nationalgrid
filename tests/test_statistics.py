@@ -105,12 +105,18 @@ async def test_import_hourly_stats_gas_converts_therms(
 @patch("custom_components.national_grid.statistics.get_instance")
 async def test_import_interval_stats(mock_get_instance, mock_add_stats, hass) -> None:
     """Test interval reads are bucketed into hourly totals."""
+    from datetime import datetime, timedelta, UTC
+    
     mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
 
+    # Use dates within the last 2 days so they pass the cutoff
+    now = datetime.now(tz=UTC)
+    base_time = (now - timedelta(hours=2)).replace(minute=0, second=0, microsecond=0)
+    
     reads = [
-        {"startTime": "2025-01-15T10:00:00", "value": 0.25},
-        {"startTime": "2025-01-15T10:15:00", "value": 0.30},
-        {"startTime": "2025-01-15T11:00:00", "value": 0.50},
+        {"startTime": base_time.isoformat(), "value": 0.25},
+        {"startTime": (base_time + timedelta(minutes=15)).isoformat(), "value": 0.30},
+        {"startTime": (base_time + timedelta(hours=1)).isoformat(), "value": 0.50},
     ]
     coordinator = MagicMock()
     coordinator.data = _make_coordinator_data(interval_reads={"SP1": reads})
@@ -118,7 +124,7 @@ async def test_import_interval_stats(mock_get_instance, mock_add_stats, hass) ->
     await async_import_all_statistics(hass, coordinator)
     assert mock_add_stats.called
     stats = mock_add_stats.call_args[0][2]
-    # Two hourly buckets: 10:00 (0.25+0.30=0.55) and 11:00 (0.50)
+    # Two hourly buckets: base_time (0.25+0.30=0.55) and base_time+1h (0.50)
     assert len(stats) == 2
     assert abs(stats[0]["state"] - 0.55) < 0.01
     assert stats[1]["state"] == 0.50
@@ -144,7 +150,7 @@ async def test_import_interval_stats_skips_empty(
 async def test_import_hourly_stats_with_existing_sum(
     mock_get_instance, mock_add_stats, hass
 ) -> None:
-    """Test hourly stats continues from last imported sum."""
+    """Test hourly stats continues from last imported sum on incremental updates."""
     # Return existing statistics with a sum and timestamp
     existing = {
         "national_grid:SP1_electric_hourly_usage": [
@@ -163,6 +169,7 @@ async def test_import_hourly_stats_with_existing_sum(
     coordinator.data = _make_coordinator_data(
         ami_usages={"SP1": readings},
         meters={"SP1": _make_meter_data("Electric")},
+        is_first_refresh=False,  # Incremental update - use existing sum
     )
 
     await async_import_all_statistics(hass, coordinator)
@@ -212,31 +219,43 @@ async def test_import_hourly_stats_skips_bad_date(
 
 @patch("custom_components.national_grid.statistics.async_add_external_statistics")
 @patch("custom_components.national_grid.statistics.get_instance")
-async def test_import_interval_stats_with_existing_sum(
+async def test_import_interval_stats_always_reimports_fresh(
     mock_get_instance, mock_add_stats, hass
 ) -> None:
-    """Test interval stats continues from last imported sum."""
-    existing = {
-        "national_grid:SP1_electric_interval_usage": [
-            {"sum": 5.0, "start": 1736935200.0}  # 2025-01-15T10:00:00 UTC
-        ]
-    }
-    mock_get_instance.return_value.async_add_executor_job = AsyncMock(
-        return_value=existing
-    )
+    """Test interval stats always clears and reimports fresh (no continuation from existing sum)."""
+    from datetime import datetime, timedelta, UTC
+    
+    # Use dates within the last 2 days
+    now = datetime.now(tz=UTC)
+    base_time = (now - timedelta(hours=3)).replace(minute=0, second=0, microsecond=0)
+    
+    # Mock the recorder instance with async_clear_statistics
+    mock_recorder = MagicMock()
+    mock_recorder.async_clear_statistics = MagicMock()
+    mock_get_instance.return_value = mock_recorder
 
     reads = [
-        {"startTime": "2025-01-15T10:00:00", "value": 0.25},  # skipped
-        {"startTime": "2025-01-15T11:00:00", "value": 0.50},  # included
+        {"startTime": base_time.isoformat(), "value": 0.25},
+        {"startTime": (base_time + timedelta(hours=1)).isoformat(), "value": 0.50},
     ]
     coordinator = MagicMock()
-    coordinator.data = _make_coordinator_data(interval_reads={"SP1": reads})
+    coordinator.data = _make_coordinator_data(
+        interval_reads={"SP1": reads},
+        is_first_refresh=False,  # Even on incremental, interval stats always reimport fresh
+    )
 
     await async_import_all_statistics(hass, coordinator)
+    
+    # Verify clear was called
+    assert mock_recorder.async_clear_statistics.called
+    
+    # Verify stats were imported
     assert mock_add_stats.called
     stats = mock_add_stats.call_args[0][2]
-    assert len(stats) == 1
-    assert stats[0]["sum"] == 5.5
+    assert len(stats) == 2  # Both hours included
+    # Sum starts from 0 (not continuing from previous)
+    assert stats[0]["sum"] == 0.25
+    assert stats[1]["sum"] == 0.75
 
 
 @patch("custom_components.national_grid.statistics.async_add_external_statistics")
@@ -286,37 +305,40 @@ async def test_import_all_statistics_skips_missing_meter(hass) -> None:
 
 @patch("custom_components.national_grid.statistics.async_add_external_statistics")
 @patch("custom_components.national_grid.statistics.get_instance")
-async def test_import_hourly_stats_48h_cutoff_on_incremental(
+async def test_import_hourly_stats_imports_all_new_data(
     mock_get_instance, mock_add_stats, hass
 ) -> None:
-    """Test that 48-hour cutoff is applied on incremental updates (not first refresh)."""
+    """Test that all new readings are imported regardless of age (no arbitrary cutoff)."""
     from datetime import UTC, datetime, timedelta
     
     mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
 
-    # Create readings: one recent (within 48h) and one old (outside 48h)
+    # Create readings: both recent and old - all should be imported since there's no cutoff
     now = datetime.now(tz=UTC)
     recent_time = (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:00:00.000Z")
     old_time = (now - timedelta(hours=72)).strftime("%Y-%m-%dT%H:00:00.000Z")
     
     readings = [
-        {"date": old_time, "quantity": 5.0},  # Should be skipped (>48h old)
+        {"date": old_time, "quantity": 5.0},  # Should be included
         {"date": recent_time, "quantity": 3.0},  # Should be included
     ]
     coordinator = MagicMock()
     coordinator.data = _make_coordinator_data(
         ami_usages={"SP1": readings},
         meters={"SP1": _make_meter_data("Electric")},
-        is_first_refresh=False,  # Incremental update - apply 48h cutoff
+        is_first_refresh=False,  # Even on incremental, all new data is imported
     )
 
     await async_import_all_statistics(hass, coordinator)
     
-    # Should have been called with only the recent reading
+    # Both readings should be imported (no 48h cutoff)
     assert mock_add_stats.called
     stats = mock_add_stats.call_args[0][2]
-    assert len(stats) == 1
-    assert stats[0]["state"] == 3.0  # Only the recent reading
+    assert len(stats) == 2
+    # Stats should be sorted by time, so old_time first, then recent_time
+    assert stats[0]["state"] == 5.0  # Old reading
+    assert stats[1]["state"] == 3.0  # Recent reading
+    assert stats[1]["sum"] == 8.0  # Running sum
 
 
 @patch("custom_components.national_grid.statistics.async_add_external_statistics")
@@ -325,15 +347,21 @@ async def test_import_interval_stats_with_return_values(
     mock_get_instance, mock_add_stats, hass
 ) -> None:
     """Test interval stats creates separate consumption and return statistics when negative values exist."""
+    from datetime import datetime, timedelta, UTC
+    
     mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
 
+    # Use dates within the last 2 days
+    now = datetime.now(tz=UTC)
+    base_time = (now - timedelta(hours=3)).replace(minute=0, second=0, microsecond=0)
+    
     # Create interval reads with both positive (consumption) and negative (return/solar) values
     reads = [
-        {"startTime": "2025-01-15T10:00:00", "value": 0.5},   # Consumption
-        {"startTime": "2025-01-15T10:15:00", "value": 0.3},   # Consumption
-        {"startTime": "2025-01-15T11:00:00", "value": -0.4},  # Return (solar)
-        {"startTime": "2025-01-15T11:15:00", "value": -0.2},  # Return (solar)
-        {"startTime": "2025-01-15T12:00:00", "value": 0.6},   # Consumption
+        {"startTime": base_time.isoformat(), "value": 0.5},   # Consumption
+        {"startTime": (base_time + timedelta(minutes=15)).isoformat(), "value": 0.3},   # Consumption
+        {"startTime": (base_time + timedelta(hours=1)).isoformat(), "value": -0.4},  # Return (solar)
+        {"startTime": (base_time + timedelta(hours=1, minutes=15)).isoformat(), "value": -0.2},  # Return (solar)
+        {"startTime": (base_time + timedelta(hours=2)).isoformat(), "value": 0.6},   # Consumption
     ]
     coordinator = MagicMock()
     coordinator.data = _make_coordinator_data(
@@ -360,13 +388,19 @@ async def test_import_interval_stats_no_return_when_no_negative(
     mock_get_instance, mock_add_stats, hass
 ) -> None:
     """Test interval stats only creates consumption statistic when no negative values exist."""
+    from datetime import datetime, timedelta, UTC
+    
     mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
 
+    # Use dates within the last 2 days
+    now = datetime.now(tz=UTC)
+    base_time = (now - timedelta(hours=3)).replace(minute=0, second=0, microsecond=0)
+    
     # Create interval reads with only positive values (no solar)
     reads = [
-        {"startTime": "2025-01-15T10:00:00", "value": 0.5},
-        {"startTime": "2025-01-15T10:15:00", "value": 0.3},
-        {"startTime": "2025-01-15T11:00:00", "value": 0.4},
+        {"startTime": base_time.isoformat(), "value": 0.5},
+        {"startTime": (base_time + timedelta(minutes=15)).isoformat(), "value": 0.3},
+        {"startTime": (base_time + timedelta(hours=1)).isoformat(), "value": 0.4},
     ]
     coordinator = MagicMock()
     coordinator.data = _make_coordinator_data(

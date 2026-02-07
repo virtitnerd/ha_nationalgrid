@@ -41,10 +41,10 @@ Configuration is done entirely through the Home Assistant UI.
 
 ### Configuration Parameters
 
-| Parameter | Description |
-|-----------|-------------|
-| Username  | Your National Grid online account email or username |
-| Password  | Your National Grid online account password |
+| Parameter         | Description                                                                      |
+| ----------------- | -------------------------------------------------------------------------------- |
+| Username          | Your National Grid online account email or username                              |
+| Password          | Your National Grid online account password                                       |
 | Selected Accounts | Which linked billing accounts to monitor (shown only if multiple accounts exist) |
 
 ## Removal
@@ -54,35 +54,56 @@ Configuration is done entirely through the Home Assistant UI.
 3. Click the three-dot menu and select **Delete**.
 4. Optionally, remove the `custom_components/national_grid` folder and restart Home Assistant.
 
+## Data Sources
+
+The integration uses two different APIs that serve different purposes:
+
+### Electric Hourly Usage (Recommended for Energy Dashboard)
+
+- **Data Type**: Verified/validated hourly readings
+- **History**: Up to 5 years
+- **Delay**: ~2 days (API only returns data older than 2 days from midnight)
+- **Statistics**: `national_grid:{sp}_electric_hourly_usage`, `national_grid:{sp}_electric_return_hourly_usage`
+
+**Use this for the Energy Dashboard** - it has years of historical data and is the authoritative source for your usage.
+
+### Electric Interval Usage (Real-time, Last 2 Days Only)
+
+- **Data Type**: Unverified/temporary 15-minute readings
+- **History**: **Last 2 days only** (from midnight)
+- **Delay**: Near real-time
+- **Statistics**: `national_grid:{sp}_electric_interval_usage`, `national_grid:{sp}_electric_interval_return_usage`
+
+This fills the gap between "now" and when Hourly data becomes available. The integration enforces a 2-day cutoff to ensure **no overlap** with Hourly data.
+
 ## Entities
 
 The integration creates the following entities for each meter on your account:
 
 ### Sensors
 
-| Entity | Description | Unit | Device Class |
-|--------|-------------|------|--------------|
+| Entity             | Description                       | Unit                       | Device Class |
+| ------------------ | --------------------------------- | -------------------------- | ------------ |
 | Last Billing Usage | Most recent monthly billing usage | kWh (electric) / CCF (gas) | Energy / Gas |
-| Last Billing Cost | Most recent monthly billing cost | $ | Monetary |
+| Last Billing Cost  | Most recent monthly billing cost  | $                          | Monetary     |
 
 ### Binary Sensors
 
-| Entity | Description | Category |
-|--------|-------------|----------|
+| Entity      | Description                             | Category   |
+| ----------- | --------------------------------------- | ---------- |
 | Smart Meter | Whether the meter is an AMI smart meter | Diagnostic |
 
 ### Device Information
 
 Each meter device includes detailed information:
 
-| Field | Description |
-|-------|-------------|
-| Name | Fuel type and meter designation (e.g., "Electric Meter") |
-| Model | Meter type (AMI Smart Meter, Smart Meter, or Standard Meter) |
-| Serial Number | Meter number |
-| Hardware Version | Service Point, Meter Point, and Premise numbers |
-| Software Version | Device code, Region, and Customer type |
-| Suggested Area | Derived from service address |
+| Field            | Description                                                  |
+| ---------------- | ------------------------------------------------------------ |
+| Name             | Fuel type and meter designation (e.g., "Electric Meter")     |
+| Model            | Meter type (AMI Smart Meter, Smart Meter, or Standard Meter) |
+| Serial Number    | Meter number                                                 |
+| Hardware Version | Service Point, Meter Point, and Premise numbers              |
+| Software Version | Device code, Region, and Customer type                       |
 
 ## Data Updates
 
@@ -97,35 +118,41 @@ The integration polls National Grid's API **every hour**. Each update fetches:
 ### First Setup vs. Incremental Updates
 
 **On first setup**, the integration imports full historical data:
+
 - Up to 5 years of AMI hourly usage data
-- Up to 5 years of interval read data (if available from the API)
+- Up to 2 days worth of interval read data (if available from the API)
 - 15 months of billing usage data
 
 **On incremental updates** (after first setup):
+
 - AMI data: Last 48 hours only (prevents overlap with interval data)
 - Interval data: Last 24 hours
 - Billing data: Last 12 months
 
 ## Long-Term Statistics
 
-The integration imports external statistics into Home Assistant's recorder on every update. These statistics can be used in the **Energy dashboard** and for long-term trend analysis.
-
 ### Electric Meters
 
-| Statistic ID | Description | Unit | Notes |
-|--------------|-------------|------|-------|
-| `national_grid:{sp}_electric_hourly_usage` | Electric hourly AMI consumption | kWh | Energy consumed from grid |
-| `national_grid:{sp}_electric_return_hourly_usage` | Electric hourly AMI return | kWh | Energy returned to grid (solar users only) |
-| `national_grid:{sp}_electric_interval_usage` | Electric interval consumption | kWh | 15-minute data aggregated hourly |
-| `national_grid:{sp}_electric_interval_return_usage` | Electric interval return | kWh | Energy returned (solar users only) |
+| Statistic ID                                        | Source       | Description              | History     |
+| --------------------------------------------------- | ------------ | ------------------------ | ----------- |
+| `national_grid:{sp}_electric_hourly_usage`          | Hourly API   | Verified consumption     | **Years** ✓ |
+| `national_grid:{sp}_electric_return_hourly_usage`   | Hourly API   | Verified return (solar)  | **Years** ✓ |
+| `national_grid:{sp}_electric_interval_usage`        | Interval API | Real-time consumption    | Last 2 days |
+| `national_grid:{sp}_electric_interval_return_usage` | Interval API | Real-time return (solar) | Last 2 days |
 
 ### Gas Meters
 
-| Statistic ID | Description | Unit |
-|--------------|-------------|------|
-| `national_grid:{sp}_gas_hourly_usage` | Gas hourly AMI usage | CCF |
+| Statistic ID                          | Source     | Description     | History     |
+| ------------------------------------- | ---------- | --------------- | ----------- |
+| `national_grid:{sp}_gas_hourly_usage` | Hourly API | Gas consumption | **Years** ✓ |
 
-`{sp}` is replaced with your meter's service point identifier.
+### No Overlap Design
+
+The integration ensures **no overlap** between Hourly and Interval statistics:
+- **Hourly Usage**: Contains verified data older than ~2 days (API enforced)
+- **Interval Usage**: Contains only the last 2 days from midnight (integration enforced)
+
+This means you can safely add **both** to the Energy Dashboard - they cover different time periods.
 
 ### Energy Dashboard Setup
 
@@ -133,48 +160,80 @@ To add these statistics to the Energy dashboard:
 
 1. Go to **Settings > Dashboards > Energy**
 2. Under **Electricity grid**:
-   - Add `national_grid:{sp}_electric_hourly_usage` or `national_grid:{sp}_electric_interval_usage` as "Grid consumption"
-   - If you have solar, add `national_grid:{sp}_electric_return_hourly_usage` or `national_grid:{sp}_electric_interval_return_usage` as "Return to grid"
+   - Add `national_grid:{sp}_electric_hourly_usage` and/or `national_grid:{sp}_electric_interval_usage` as "Grid consumption"
+   - If you have solar, add `national_grid:{sp}_electric_return_hourly_usage` and/or `national_grid:{sp}_electric_interval_return_usage` as "Return to grid"
 3. Under **Gas consumption**:
    - Add `national_grid:{sp}_gas_hourly_usage`
 
-**Note**: Choose either hourly OR interval statistics for each type - don't add both to avoid double-counting.
 
 ## Services
 
 ### `national_grid.force_full_refresh`
 
 Triggers a full historical data refresh, reimporting up to 5 years of data. Use this to:
+
 - Recover from data gaps
 - Repopulate statistics after database issues
 - Force a complete resync of historical data
 
 **Service Data:**
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `entry_id` | No | Config entry ID of a specific integration to refresh. If not provided, all National Grid integrations are refreshed. |
+| Field      | Required | Description                                                                                                          |
+| ---------- | -------- | -------------------------------------------------------------------------------------------------------------------- |
+| `entry_id` | No       | Config entry ID of a specific integration to refresh. If not provided, all National Grid integrations are refreshed. |
 
 **Example automation:**
+
 ```yaml
 service: national_grid.force_full_refresh
 data: {}
 ```
 
+## Update Schedule
+
+The integration refreshes data at the **18th minute of every hour**:
+
+| Time | Refresh Type | What's Fetched |
+|------|--------------|----------------|
+| **00:18** (midnight) | Full refresh | **Forces full hourly import** (fills gaps) + clears & reimports Interval (last 2 days) |
+| **01:18 - 23:18** | Interval-only | Interval reads only (hourly data unchanged) |
+
+### Why This Schedule?
+
+- **Hourly Usage** data becomes available around midnight each day (with a ~2 day delay)
+- **Interval** data is near real-time and updates frequently
+- The midnight full refresh:
+  - **Forces a full hourly import** - reimports ALL hourly data to capture newly available readings
+  - Clears interval statistics and reimports only the last 2 days
+  - This ensures no gaps in hourly data and no overlap with interval stats
+- Hourly refreshes (01:18-23:18) only update interval stats to minimize API calls
+
 ## Troubleshooting
+
+### Understanding Hourly vs Interval Statistics
+
+**Important**: Hourly Usage and Interval Usage are **separate statistics** that don't overlap.
+
+- `national_grid:{sp}_electric_hourly_usage` - Verified data, years of history, ~2 day delay
+- `national_grid:{sp}_electric_interval_usage` - Real-time data, **last 2 days only** (yesterday + today)
+
+The integration automatically manages these to avoid overlap:
+- At midnight, hourly stats are fully reimported (filling any gaps from newly available API data)
+- Interval stats are always cleared and reimported (last 2 days only)
+- This ensures Hourly has all historical data, and Interval only fills the recent gap
+
+For the **Energy Dashboard**, you should use **only Hourly Usage** (recommended) for accurate historical tracking. Interval Usage is primarily for real-time monitoring.
 
 ### Missing Historical Data
 
-If you notice gaps in your historical statistics:
-1. Call the `national_grid.force_full_refresh` service
-2. Wait for the refresh to complete (check logs for "Force full refresh completed")
-3. Verify data in Developer Tools > Statistics
+If you notice gaps in your statistics:
+1. Call `national_grid.force_full_refresh` service
+2. Wait for completion (check logs for "Statistics import complete")
+3. Note: The Hourly API has a ~2 day delay, so the most recent 2 days won't be available
 
-### Double Counting in Energy Dashboard
-
-If energy values appear doubled:
-- Ensure you're only using ONE statistic type per energy source (either hourly OR interval, not both)
-- The integration automatically prevents overlap between AMI and interval data
+**What Force Full Refresh does:**
+- Reimports all available Hourly Usage data (fills gaps)
+- Does NOT clear Interval Usage statistics (that happens automatically at midnight)
 
 ### Logs
 

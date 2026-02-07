@@ -62,8 +62,10 @@ The integration uses two different APIs that serve different purposes:
 
 - **Data Type**: Verified/validated hourly readings
 - **History**: Up to 5 years
-- **Delay**: ~2 days (API only returns data older than 2 days from midnight)
+- **Delay**: ~2-day delay (API only returns data older than 2 days from midnight)
 - **Statistics**: `national_grid:{sp}_electric_hourly_usage`, `national_grid:{sp}_electric_return_hourly_usage`
+
+> **Note**: `{sp}` is your meter's service point identifier. For example: `national_grid:123456789_electric_hourly_usage`. You can find your service point number in the device info for your meter in Home Assistant.
 
 **Use this for the Energy Dashboard** - it has years of historical data and is the authoritative source for your usage.
 
@@ -148,11 +150,11 @@ The integration polls National Grid's API **every hour**. Each update fetches:
 
 ### No Overlap Design
 
-The integration ensures **no overlap** between Hourly and Interval statistics:
+The integration ensures **no overlap** between Hourly and Interval statistics by enforcing a 2-day cutoff:
 - **Hourly Usage**: Contains verified data older than ~2 days (API enforced)
 - **Interval Usage**: Contains only the last 2 days from midnight (integration enforced)
 
-This means you can safely add **both** to the Energy Dashboard - they cover different time periods.
+Because they cover different time periods, you can safely add **both** to the Energy Dashboard. However, for most users, **Hourly Usage alone is recommended** since it provides years of verified historical data. Use Interval only if you need real-time visibility into the most recent 2 days.
 
 ### Energy Dashboard Setup
 
@@ -160,8 +162,9 @@ To add these statistics to the Energy dashboard:
 
 1. Go to **Settings > Dashboards > Energy**
 2. Under **Electricity grid**:
-   - Add `national_grid:{sp}_electric_hourly_usage` and/or `national_grid:{sp}_electric_interval_usage` as "Grid consumption"
-   - If you have solar, add `national_grid:{sp}_electric_return_hourly_usage` and/or `national_grid:{sp}_electric_interval_return_usage` as "Return to grid"
+   - **Recommended**: Add only `national_grid:{sp}_electric_hourly_usage` as "Grid consumption" (verified data, years of history)
+   - **Optional**: Also add `national_grid:{sp}_electric_interval_usage` for real-time data (last 2 days only, no overlap)
+   - If you have solar, add `national_grid:{sp}_electric_return_hourly_usage` (and optionally `national_grid:{sp}_electric_interval_return_usage`) as "Return to grid"
 3. Under **Gas consumption**:
    - Add `national_grid:{sp}_gas_hourly_usage`
 
@@ -200,7 +203,7 @@ The integration refreshes data at the **18th minute of every hour**:
 
 ### Why This Schedule?
 
-- **Hourly Usage** data becomes available around midnight each day (with a ~2 day delay)
+- **Hourly Usage** data becomes available around midnight each day (with a ~2-day delay)
 - **Interval** data is near real-time and updates frequently
 - The midnight full refresh:
   - **Forces a full hourly import** - reimports ALL hourly data to capture newly available readings
@@ -212,9 +215,9 @@ The integration refreshes data at the **18th minute of every hour**:
 
 ### Understanding Hourly vs Interval Statistics
 
-**Important**: Hourly Usage and Interval Usage are **separate statistics** that don't overlap.
+**Important**: Hourly Usage and Interval Usage are **separate statistics** that don't overlap due to the 2-day cutoff.
 
-- `national_grid:{sp}_electric_hourly_usage` - Verified data, years of history, ~2 day delay
+- `national_grid:{sp}_electric_hourly_usage` - Verified data, years of history, ~2-day delay
 - `national_grid:{sp}_electric_interval_usage` - Real-time data, **last 2 days only** (yesterday + today)
 
 The integration automatically manages these to avoid overlap:
@@ -222,7 +225,7 @@ The integration automatically manages these to avoid overlap:
 - Interval stats are always cleared and reimported (last 2 days only)
 - This ensures Hourly has all historical data, and Interval only fills the recent gap
 
-For the **Energy Dashboard**, you should use **only Hourly Usage** (recommended) for accurate historical tracking. Interval Usage is primarily for real-time monitoring.
+For the **Energy Dashboard**, **Hourly Usage is recommended** as the primary source for accurate historical tracking. You can optionally add Interval Usage for real-time monitoring of the most recent 2 days (there will be no double-counting).
 
 ### Missing Historical Data
 

@@ -56,15 +56,17 @@ def _build_statistic_metadata(
     statistic_id: str,
     name: str,
     unit: str,
+    unit_class: str,
 ) -> StatisticMetaData:
-    """Build StatisticMetaData with HA 2025.11+ mean_type compatibility."""
-    kwargs = {
+    """Build StatisticMetaData with mean_type and unit_class compatibility."""
+    kwargs: dict[str, object] = {
         "has_mean": False,
         "has_sum": True,
         "name": name,
         "source": DOMAIN,
         "statistic_id": statistic_id,
         "unit_of_measurement": unit,
+        "unit_class": unit_class,
     }
     if HAS_MEAN_TYPE:
         kwargs["mean_type"] = StatisticMeanType.NONE
@@ -95,11 +97,16 @@ async def async_import_all_statistics(
         _LOGGER.info("No data available to import statistics")
         return
 
-    # Determine if we should force import all hourly data
-    # This happens on: first refresh, force refresh, OR midnight refresh
+    # Determine if we should force import all hourly data.
+    # Only on first refresh (or force_full_refresh which resets to first refresh).
+    # Midnight refresh uses incremental import — its role is to fetch fresh AMI
+    # data from the API (coordinator handles that), then we import any new
+    # readings that weren't already recorded.  Using force mode here would
+    # reset running_sum to 0 even though we only have a few days of data,
+    # corrupting the cumulative sums in the recorder.
     is_first_refresh = data.is_first_refresh
     is_midnight_refresh = data.is_midnight_refresh
-    force_hourly_import = is_first_refresh or is_midnight_refresh
+    force_hourly_import = is_first_refresh
 
     # Determine mode for logging
     if is_first_refresh:
@@ -234,14 +241,17 @@ async def _import_hourly_stats(
         fuel = "gas"
         statistic_id = f"{DOMAIN}:{service_point}_{fuel}_hourly_usage"
         unit = "CCF"
+        unit_class = "gas"
     elif return_only:
         fuel = "electric"
         statistic_id = f"{DOMAIN}:{service_point}_{fuel}_return_hourly_usage"
         unit = UnitOfEnergy.KILO_WATT_HOUR
+        unit_class = "energy"
     else:
         fuel = "electric"
         statistic_id = f"{DOMAIN}:{service_point}_{fuel}_hourly_usage"
         unit = UnitOfEnergy.KILO_WATT_HOUR
+        unit_class = "energy"
 
     # Get last imported sum to continue cumulative total (only if not forcing full import)
     last_sum = 0.0
@@ -354,7 +364,7 @@ async def _import_hourly_stats(
     else:
         stat_name = f"{service_point} Electric Hourly Usage"
 
-    metadata = _build_statistic_metadata(statistic_id, stat_name, unit)
+    metadata = _build_statistic_metadata(statistic_id, stat_name, unit, unit_class)
     async_add_external_statistics(hass, metadata, stats)
 
     _LOGGER.info(
@@ -537,7 +547,7 @@ async def _import_interval_stats(
         return
 
     metadata = _build_statistic_metadata(
-        statistic_id, stat_name, UnitOfEnergy.KILO_WATT_HOUR
+        statistic_id, stat_name, UnitOfEnergy.KILO_WATT_HOUR, "energy"
     )
     async_add_external_statistics(hass, metadata, stats)
 

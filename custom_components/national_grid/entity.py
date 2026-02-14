@@ -49,7 +49,6 @@ class NationalGridEntity(CoordinatorEntity[NationalGridDataUpdateCoordinator]):
         fuel_type = str(meter.get("fuelType", ""))
         has_ami = bool(meter.get("hasAmiSmartMeter", False))
         is_smart = bool(meter.get("isSmartMeter", False))
-        meter_point_number = str(meter.get("meterPointNumber", ""))
 
         # Build device name
         name = (
@@ -76,10 +75,6 @@ class NationalGridEntity(CoordinatorEntity[NationalGridDataUpdateCoordinator]):
             addr_info = billing_account.get("serviceAddress", {})
             service_address = str(addr_info.get("serviceAddressCompressed", ""))
 
-        premise_number = (
-            billing_account.get("premiseNumber") if billing_account else None
-        )
-
         # Build configuration URL with account info if available
         config_url = "https://myaccount.nationalgrid.com"
 
@@ -100,17 +95,6 @@ class NationalGridEntity(CoordinatorEntity[NationalGridDataUpdateCoordinator]):
             if len(parts) >= 2:
                 # Use city or first meaningful part
                 device_info["suggested_area"] = parts[0].strip().title()
-
-        # Add hardware version with meter identifiers
-        hw_parts = []
-        hw_parts.append(f"SP: {self._service_point_number}")
-        if meter_point_number:
-            hw_parts.append(f"MP: {meter_point_number}")
-        if premise_number:
-            hw_parts.append(f"Premise: {premise_number}")
-
-        if hw_parts:
-            device_info["hw_version"] = " | ".join(hw_parts)
 
         return device_info
 

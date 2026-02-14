@@ -104,7 +104,6 @@ Each meter device includes detailed information:
 | Name             | Fuel type and meter designation (e.g., "Electric Meter")     |
 | Model            | Meter type (AMI Smart Meter, Smart Meter, or Standard Meter) |
 | Serial Number    | Meter number                                                 |
-| Hardware Version | Service Point, Meter Point, and Premise numbers              |
 
 ## Data Updates
 

@@ -33,6 +33,7 @@ from homeassistant.components.recorder.models import (
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
     get_last_statistics,
+    statistics_during_period,
 )
 from homeassistant.const import UnitOfEnergy
 
@@ -128,6 +129,7 @@ async def async_import_all_statistics(
     # Only force-import all hourly data on first refresh (or
     # force_full_refresh which resets to first refresh).
     force_hourly_import = data.is_first_refresh
+    is_midnight_refresh = data.is_midnight_refresh
 
     mode = (
         "first_refresh"
@@ -159,6 +161,7 @@ async def async_import_all_statistics(
                 ami_readings,
                 is_gas=True,
                 force_import_all=force_hourly_import,
+                is_midnight_refresh=is_midnight_refresh,
             )
         else:
             await _import_hourly_stats_electric(
@@ -166,6 +169,7 @@ async def async_import_all_statistics(
                 sp,
                 ami_readings,
                 force_import_all=force_hourly_import,
+                is_midnight_refresh=is_midnight_refresh,
             )
 
     # Import interval read stats (electric only)
@@ -181,6 +185,7 @@ async def _import_hourly_stats_electric(
     readings: list,
     *,
     force_import_all: bool = False,
+    is_midnight_refresh: bool = False,
 ) -> None:
     """Import hourly AMI stats for electric, split by direction.
 
@@ -194,6 +199,7 @@ async def _import_hourly_stats_electric(
         is_gas=False,
         consumption_only=True,
         force_import_all=force_import_all,
+        is_midnight_refresh=is_midnight_refresh,
     )
 
     has_negative = any(float(r.get("quantity", 0)) < 0 for r in readings)
@@ -205,6 +211,7 @@ async def _import_hourly_stats_electric(
             is_gas=False,
             return_only=True,
             force_import_all=force_import_all,
+            is_midnight_refresh=is_midnight_refresh,
         )
 
 
@@ -217,6 +224,7 @@ async def _import_hourly_stats(  # noqa: PLR0913
     consumption_only: bool = False,
     return_only: bool = False,
     force_import_all: bool = False,
+    is_midnight_refresh: bool = False,
 ) -> None:
     """Import hourly AMI usage statistics."""
     stat_id, fuel, unit, unit_class, stat_name = _resolve_hourly_stat_info(
@@ -230,6 +238,8 @@ async def _import_hourly_stats(  # noqa: PLR0913
         stat_id,
         force_import_all=force_import_all,
         reading_count=len(readings),
+        readings=readings,
+        is_midnight_refresh=is_midnight_refresh,
     )
 
     stats, running_sum = _build_hourly_stat_list(
@@ -264,14 +274,22 @@ async def _import_hourly_stats(  # noqa: PLR0913
     )
 
 
-async def _get_last_sum_and_ts(
+async def _get_last_sum_and_ts(  # noqa: PLR0913
     hass: HomeAssistant,
     statistic_id: str,
     *,
     force_import_all: bool,
     reading_count: int,
+    readings: list,
+    is_midnight_refresh: bool,
 ) -> tuple[float, float]:
-    """Return (last_sum, last_ts) from recorder, or (0, 0) if forcing."""
+    """Return (last_sum, last_ts) from recorder, or (0, 0) if forcing.
+
+    For midnight refresh, imports all data in the 5-day window by:
+    1. Finding the earliest reading timestamp
+    2. Querying for the last statistic before that timestamp
+    3. Returning that sum with last_ts set to 0 (to import all readings)
+    """
     if force_import_all:
         _LOGGER.info(
             "Force import mode for %s - will import all %d readings (fills gaps)",
@@ -280,6 +298,59 @@ async def _get_last_sum_and_ts(
         )
         return 0.0, 0.0
 
+    if is_midnight_refresh and readings:
+        # Find earliest timestamp in the readings
+        earliest_ts: float | None = None
+        for reading in readings:
+            date_str = str(reading.get("date", ""))
+            if not date_str:
+                continue
+            dt = _parse_ami_datetime(date_str)
+            if dt is not None:
+                ts = dt.timestamp()
+                if earliest_ts is None or ts < earliest_ts:
+                    earliest_ts = ts
+
+        if earliest_ts is not None:
+            # Query for statistics before the 5-day window
+            earliest_dt = datetime.fromtimestamp(earliest_ts, tz=UTC)
+            stats = await get_instance(hass).async_add_executor_job(
+                partial(
+                    statistics_during_period,
+                    hass,
+                    datetime.fromtimestamp(0, tz=UTC),  # From epoch
+                    earliest_dt,  # Until start of window
+                    {statistic_id},
+                    "hour",
+                    None,
+                    {"sum"},
+                )
+            )
+
+            if stats.get(statistic_id):
+                # Get the last (most recent) statistic before the window
+                last_stat = stats[statistic_id][-1]
+                last_sum = last_stat.get("sum") or 0.0
+                _LOGGER.info(
+                    "Midnight refresh for %s: importing all %d readings "
+                    "in 5-day window (continuing from sum=%.3f before %s)",
+                    statistic_id,
+                    reading_count,
+                    last_sum,
+                    earliest_dt.strftime("%Y-%m-%d %H:%M UTC"),
+                )
+                # Return last_ts=0 to import all readings in window
+                return last_sum, 0.0
+
+            _LOGGER.info(
+                "Midnight refresh for %s: importing all %d readings "
+                "in 5-day window (no pre-existing stats, starting from 0)",
+                statistic_id,
+                reading_count,
+            )
+            return 0.0, 0.0
+
+    # Normal incremental mode
     last = await get_instance(hass).async_add_executor_job(
         partial(
             get_last_statistics,

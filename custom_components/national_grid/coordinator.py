@@ -188,7 +188,7 @@ class NationalGridDataUpdateCoordinator(
 
         if self._is_first_refresh:
             _LOGGER.info(
-                "First refresh - will import full historical data (up to 5 years)"
+                "First refresh - will import full historical data (from epoch)"
             )
 
         if self._is_midnight_refresh:
@@ -460,24 +460,22 @@ class NationalGridDataUpdateCoordinator(
         the API decide what data is available.
         """
         try:
+            # EndDate is always 2 days behind UTC — the GraphQL API only
+            # returns verified data older than ~2 days.
+            date_to = today - timedelta(days=2)
+
             if is_first_refresh:
-                # First time: up to 5 years of historical AMI data
-                date_from = today - timedelta(days=1825)
-                date_to = today
+                # First time: fetch all available history from epoch.
+                date_from = date(1970, 1, 1)
                 _LOGGER.info(
-                    "First refresh: fetching AMI data"
-                    " from %s to %s for meter %s"
-                    " (up to 5 years)",
-                    date_from,
+                    "First refresh: fetching AMI data from epoch to %s for meter %s",
                     date_to,
                     sp,
                 )
             else:
-                # Incremental: last 5 days to catch new data.
-                # API returns data older than ~2 days, so we
-                # request a bit more for safety.
-                date_from = today - timedelta(days=5)
-                date_to = today
+                # Incremental: last 7 days to catch backfilled data.
+                # EndDate is 2 days behind, so effective window is ~5 days.
+                date_from = today - timedelta(days=7)
                 _LOGGER.debug(
                     "Incremental: fetching AMI data from %s to %s for meter %s",
                     date_from,
@@ -547,10 +545,10 @@ class NationalGridDataUpdateCoordinator(
     ) -> None:
         """Fetch interval reads for a single electric meter.
 
-        The AMIAdapter REST API only supports ~43 hours of
-        historical data. We fetch the last 42 hours to stay
-        within the API limit. For older historical data, use
-        AMI Hourly Usage (GraphQL) which supports years.
+        The AMIAdapter REST API provides near-real-time 15-minute data.
+        We fetch from yesterday midnight UTC so interval reads pick up
+        seamlessly where hourly AMI data leaves off (hourly ends 2 days
+        ago; interval covers yesterday through now).
         """
         # Interval reads are for electric meters only.
         fuel_type = str(meter.get("fuelType", ""))
@@ -559,13 +557,16 @@ class NationalGridDataUpdateCoordinator(
 
         try:
             now = datetime.now(tz=UTC)
-            # API limit is ~43 hours, use 42 to be safe
-            start_dt = now - timedelta(hours=42)
+            # Start from yesterday midnight UTC — interval picks up where
+            # hourly (which ends at today-2) leaves off.
+            yesterday_midnight = (now - timedelta(days=1)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
 
             reads = await self.api.get_interval_reads(
                 premise_number=premise_number,
                 service_point_number=sp,
-                start_datetime=start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                start_datetime=yesterday_midnight.strftime("%Y-%m-%d %H:%M:%S"),
             )
             interval_reads[sp] = reads
 

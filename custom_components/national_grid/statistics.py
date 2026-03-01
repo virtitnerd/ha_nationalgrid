@@ -3,18 +3,19 @@
 Creates external statistic series for energy usage:
 
 For electric meters:
-- Hourly AMI stats: Verified data with years of history (~2-day API delay)
-- Interval stats: Near real-time 15-minute data, last 2 days only
+- Hourly AMI stats: Verified data from epoch; GraphQL API only returns
+  data older than ~2 days (date_to = today - 2 days UTC)
+- Interval stats: Near real-time 15-minute data from yesterday midnight UTC,
+  picking up seamlessly where hourly data leaves off
 
 For gas meters:
 - Hourly AMI stats only (no interval data available)
 
 Import strategy:
-- First refresh: Import ALL available hourly data (up to 5 years)
-- Midnight refresh: Incremental hourly import (catches newly available data)
-- Hourly refresh: Interval stats only (cleared and reimported each time)
-- Interval stats cover only the last 2 calendar days, avoiding overlap
-  with hourly data
+- First refresh: Import ALL available hourly data (epoch to today-2)
+- Midnight refresh: Import all data in 5-day window, continuing cumulative
+  sum from before the window (catches backfilled/newly available data)
+- Incremental: Interval stats only (cleared and reimported each time)
 """
 
 from __future__ import annotations
@@ -437,8 +438,8 @@ async def _import_interval_stats_electric(
 ) -> None:
     """Import interval stats for electric, split by direction.
 
-    Interval stats cover the last 2 days only, matching the
-    hourly API's ~2-day delay to avoid overlap.
+    Interval stats cover from yesterday midnight UTC onward, picking up
+    seamlessly where hourly AMI data (ending at today-2) leaves off.
     Always clears and reimports for accuracy.
     """
     await _import_interval_stats(
@@ -468,9 +469,11 @@ async def _import_interval_stats(
 ) -> None:
     """Import 15-min interval stats for electric meters.
 
-    Always clears and reimports within the 2-day window.
+    Always clears and reimports from yesterday midnight UTC, which is
+    exactly where hourly AMI data (ending at today-2) leaves off.
     """
-    # Cutoff: yesterday midnight UTC
+    # Cutoff aligns with interval fetch start: yesterday midnight UTC.
+    # Hourly stats cover up to today-2; interval covers yesterday onward.
     now = datetime.now(tz=UTC)
     midnight_today = now.replace(
         hour=0,

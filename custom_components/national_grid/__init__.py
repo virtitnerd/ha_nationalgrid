@@ -6,10 +6,12 @@ https://github.com/ryanmorash/ha_nationalgrid
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import voluptuous as vol
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
+from homeassistant.exceptions import Unauthorized
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.event import async_track_time_change
 
@@ -18,8 +20,6 @@ from .coordinator import NationalGridDataUpdateCoordinator
 from .statistics import async_import_all_statistics
 
 if TYPE_CHECKING:
-    from datetime import datetime
-
     from homeassistant.core import HomeAssistant, ServiceCall
 
     from .data import NationalGridConfigEntry
@@ -38,6 +38,12 @@ SERVICE_FORCE_REFRESH_SCHEMA = vol.Schema(
         vol.Optional("entry_id"): cv.string,
     }
 )
+
+# Minimum time between force-refresh calls per entry (5 minutes)
+_FORCE_REFRESH_COOLDOWN_MINUTES = 5
+
+# Track last force-refresh time per entry_id
+_last_force_refresh: dict[str, datetime] = {}
 
 
 async def async_setup_entry(
@@ -109,6 +115,12 @@ async def _async_setup_services(hass: HomeAssistant) -> None:
 
     async def handle_force_refresh(call: ServiceCall) -> None:
         """Handle the force_full_refresh service call."""
+        # Require admin privileges — this triggers expensive API operations.
+        if call.context.user_id:
+            user = await hass.auth.async_get_user(call.context.user_id)
+            if not user or not user.is_admin:
+                raise Unauthorized(context=call.context)
+
         entry_id = call.data.get("entry_id")
 
         # Get all National Grid config entries
@@ -127,7 +139,22 @@ async def _async_setup_services(hass: HomeAssistant) -> None:
                 )
                 return
 
+        cooldown = timedelta(minutes=_FORCE_REFRESH_COOLDOWN_MINUTES)
+        now = datetime.now(tz=UTC)
+
         for entry in entries:
+            last = _last_force_refresh.get(entry.entry_id)
+            if last is not None and (now - last) < cooldown:
+                remaining = int((cooldown - (now - last)).total_seconds() // 60)
+                _LOGGER.warning(
+                    "Force refresh for %s skipped — cooldown active (%s min remaining)",
+                    entry.title,
+                    remaining,
+                )
+                continue
+
+            _last_force_refresh[entry.entry_id] = now
+
             coordinator: NationalGridDataUpdateCoordinator = entry.runtime_data
             _LOGGER.info(
                 "Force full refresh triggered for account: %s",
@@ -137,8 +164,8 @@ async def _async_setup_services(hass: HomeAssistant) -> None:
             # Reset to first refresh mode to get full historical data
             coordinator.reset_to_first_refresh()
 
-            # Trigger an immediate refresh
-            await coordinator.async_refresh()
+            # Trigger an immediate refresh (via the coordinated full-refresh path)
+            await coordinator.async_refresh_full_with_clear()
 
             # Import statistics after refresh
             await async_import_all_statistics(hass, coordinator)

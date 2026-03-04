@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -36,6 +38,17 @@ if TYPE_CHECKING:
 
 # Truncate datetime strings to "YYYY-MM-DDTHH:MM" for log readability
 _DATETIME_LOG_LEN = 16
+
+# Service point number validation: alphanumeric, hyphens, underscores, max 50 chars
+_MAX_SERVICE_POINT_LEN = 50
+_SERVICE_POINT_PATTERN = re.compile(r"^[\w\-]+$")
+
+
+def _redact_account_id(account_id: str) -> str:
+    """Return a redacted account ID showing only the last 4 characters."""
+    if len(account_id) <= 4:  # noqa: PLR2004
+        return "****"
+    return f"****{account_id[-4:]}"
 
 
 @dataclass(frozen=True)
@@ -103,14 +116,17 @@ class NationalGridDataUpdateCoordinator(
             False  # When True, force full hourly import + clear interval stats
         )
         self._pending_full_refresh = False  # Retry flag for failed full refreshes
+        # Lock prevents concurrent refresh calls from corrupting shared state flags.
+        self._refresh_lock = asyncio.Lock()
 
     async def async_refresh_interval_only(self) -> None:
         """Refresh only interval data (skip AMI hourly data)."""
-        self._interval_only_mode = True
-        try:
-            await self.async_refresh()
-        finally:
-            self._interval_only_mode = False
+        async with self._refresh_lock:
+            self._interval_only_mode = True
+            try:
+                await self.async_refresh()
+            finally:
+                self._interval_only_mode = False
 
     @property
     def pending_full_refresh(self) -> bool:
@@ -123,11 +139,12 @@ class NationalGridDataUpdateCoordinator(
         If the refresh fails, sets a pending flag so the next scheduled
         interval retries a full refresh instead of interval-only.
         """
-        self._is_midnight_refresh = True
-        try:
-            await self.async_refresh()
-        finally:
-            self._is_midnight_refresh = False
+        async with self._refresh_lock:
+            self._is_midnight_refresh = True
+            try:
+                await self.async_refresh()
+            finally:
+                self._is_midnight_refresh = False
 
         if self.last_update_success:
             self._pending_full_refresh = False
@@ -224,7 +241,9 @@ class NationalGridDataUpdateCoordinator(
                 NationalGridError,
             ) as err:
                 _LOGGER.warning(
-                    "Error fetching data for account %s: %s", account_id, err
+                    "Error fetching data for account %s: %s",
+                    _redact_account_id(account_id),
+                    err,
                 )
                 continue
 
@@ -275,12 +294,12 @@ class NationalGridDataUpdateCoordinator(
     ) -> None:
         """Fetch billing, usage, cost, and AMI data for a single account."""
         # Fetch billing account info (always needed for premise number).
-        _LOGGER.debug("Fetching billing account: %s", account_id)
+        _LOGGER.debug("Fetching billing account: %s", _redact_account_id(account_id))
         billing_account = await self.api.get_billing_account(account_id)
         data.accounts[account_id] = billing_account
         _LOGGER.debug(
             "Billing account %s: region=%s, meters=%s",
-            account_id,
+            _redact_account_id(account_id),
             billing_account.get("region"),
             len(billing_account.get("meter", {}).get("nodes", [])),
         )
@@ -289,17 +308,27 @@ class NationalGridDataUpdateCoordinator(
         meter_nodes = billing_account.get("meter", {}).get("nodes", [])
         for meter in meter_nodes:
             service_point = str(meter.get("servicePointNumber", ""))
-            if service_point:
-                data.meters[service_point] = MeterData(
-                    meter=meter,
-                    account_id=account_id,
-                    billing_account=billing_account,
+            if not service_point:
+                continue
+            if len(
+                service_point
+            ) > _MAX_SERVICE_POINT_LEN or not _SERVICE_POINT_PATTERN.match(
+                service_point
+            ):
+                _LOGGER.warning(
+                    "Skipping meter with invalid service point number format"
                 )
-                _LOGGER.debug(
-                    "Found meter: service_point=%s, fuel_type=%s",
-                    service_point,
-                    meter.get("fuelType"),
-                )
+                continue
+            data.meters[service_point] = MeterData(
+                meter=meter,
+                account_id=account_id,
+                billing_account=billing_account,
+            )
+            _LOGGER.debug(
+                "Found meter: service_point=%s, fuel_type=%s",
+                service_point,
+                meter.get("fuelType"),
+            )
 
         # Skip usage/cost fetching in interval-only mode (doesn't change frequently)
         if not self._interval_only_mode:

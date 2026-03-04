@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import ATTRIBUTION, DOMAIN
+from .const import ATTRIBUTION, DOMAIN, NATIONAL_GRID_ACCOUNT_URL
 from .coordinator import NationalGridDataUpdateCoordinator
 
 if TYPE_CHECKING:
@@ -76,7 +76,7 @@ class NationalGridEntity(CoordinatorEntity[NationalGridDataUpdateCoordinator]):
             service_address = str(addr_info.get("serviceAddressCompressed", ""))
 
         # Build configuration URL with account info if available
-        config_url = "https://myaccount.nationalgrid.com"
+        config_url = NATIONAL_GRID_ACCOUNT_URL
 
         # Extract suggested area from service address (first part before comma)
         suggested_area: str | None = None

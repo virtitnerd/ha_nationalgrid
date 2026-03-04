@@ -46,14 +46,14 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     username=self._username,
                     password=self._password,
                 )
-            except InvalidAuthError as exception:
-                _LOGGER.warning(exception)
+            except InvalidAuthError:
+                _LOGGER.warning("Authentication failed during config flow")
                 _errors["base"] = "auth"
-            except CannotConnectError as exception:
-                _LOGGER.error(exception)
+            except CannotConnectError:
+                _LOGGER.error("Cannot connect to National Grid API during config flow")
                 _errors["base"] = "connection"
-            except NationalGridError as exception:
-                _LOGGER.exception(exception)
+            except NationalGridError:
+                _LOGGER.exception("Unexpected error during National Grid config flow")
                 _errors["base"] = "unknown"
             else:
                 await self.async_set_unique_id(slugify(self._username))
@@ -147,14 +147,14 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     username=username,
                     password=password,
                 )
-            except InvalidAuthError as exception:
-                _LOGGER.warning(exception)
+            except InvalidAuthError:
+                _LOGGER.warning("Authentication failed during reauth flow")
                 _errors["base"] = "auth"
-            except CannotConnectError as exception:
-                _LOGGER.error(exception)
+            except CannotConnectError:
+                _LOGGER.error("Cannot connect to National Grid API during reauth flow")
                 _errors["base"] = "connection"
-            except NationalGridError as exception:
-                _LOGGER.exception(exception)
+            except NationalGridError:
+                _LOGGER.exception("Unexpected error during National Grid reauth flow")
                 _errors["base"] = "unknown"
             else:
                 reauth_entry = self._get_reauth_entry()

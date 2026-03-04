@@ -203,7 +203,14 @@ async def _import_hourly_stats_electric(
         is_midnight_refresh=is_midnight_refresh,
     )
 
-    has_negative = any(float(r.get("quantity", 0)) < 0 for r in readings)
+    try:
+        has_negative = any(float(r.get("quantity", 0)) < 0 for r in readings)
+    except (ValueError, TypeError):
+        _LOGGER.warning(
+            "Could not determine reading direction for %s; skipping return import",
+            service_point,
+        )
+        has_negative = False
     if has_negative:
         await _import_hourly_stats(
             hass,
@@ -391,8 +398,15 @@ def _build_hourly_stat_list(
 
     for reading in sorted_readings:
         date_str = str(reading.get("date", ""))
-        quantity = float(reading.get("quantity", 0))
         if not date_str:
+            continue
+        try:
+            quantity = float(reading.get("quantity", 0))
+        except (ValueError, TypeError):
+            _LOGGER.debug(
+                "Skipping AMI reading with invalid quantity: %s",
+                reading.get("quantity"),
+            )
             continue
 
         if consumption_only and quantity < 0:
@@ -449,7 +463,15 @@ async def _import_interval_stats_electric(
         consumption_only=True,
     )
 
-    has_negative = any(float(r.get("value", 0)) < 0 for r in reads)
+    try:
+        has_negative = any(float(r.get("value", 0)) < 0 for r in reads)
+    except (ValueError, TypeError):
+        _LOGGER.warning(
+            "Could not determine reading direction for %s interval stats;"
+            " skipping return import",
+            service_point,
+        )
+        has_negative = False
     if has_negative:
         await _import_interval_stats(
             hass,
@@ -567,8 +589,15 @@ def _bucket_interval_reads(
 
     for read in reads:
         start_str = str(read.get("startTime", ""))
-        value = float(read.get("value", 0))
         if not start_str:
+            continue
+        try:
+            value = float(read.get("value", 0))
+        except (ValueError, TypeError):
+            _LOGGER.debug(
+                "Skipping interval read with invalid value: %s",
+                read.get("value"),
+            )
             continue
 
         if consumption_only and value < 0:

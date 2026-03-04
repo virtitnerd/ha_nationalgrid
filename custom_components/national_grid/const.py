@@ -13,3 +13,6 @@ CONF_SELECTED_ACCOUNTS = "selected_accounts"
 # Unit constants.
 UNIT_CCF = "CCF"
 UNIT_KWH = "kWh"
+
+# External URLs.
+NATIONAL_GRID_ACCOUNT_URL = "https://myaccount.nationalgrid.com"

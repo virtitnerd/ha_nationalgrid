@@ -533,9 +533,11 @@ class NationalGridDataUpdateCoordinator(
             CannotConnectError,
             RetryExhaustedError,
             NationalGridError,
+            ValueError,
         ) as err:
-            _LOGGER.debug(
-                "Could not fetch AMI usages for meter %s: %s",
+            _LOGGER.warning(
+                "Could not fetch AMI hourly data for meter %s (API may be temporarily"
+                " unavailable): %s — interval data will continue to work",
                 sp,
                 err,
             )

@@ -51,6 +51,4 @@ class NationalGridForceRefreshButton(NationalGridEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Fetch full AMI history for this meter and re-import its statistics."""
-        await self.coordinator.async_force_refresh_meter(
-            self._service_point_number
-        )
+        await self.coordinator.async_force_refresh_meter(self._service_point_number)

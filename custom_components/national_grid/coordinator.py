@@ -97,15 +97,11 @@ class NationalGridDataUpdateCoordinator(
         Reads from HA storage so that a completed initial import is not
         re-run on every Home Assistant restart.
         """
-        self._store = Store(
-            self.hass, 1, f"{DOMAIN}.{self.config_entry.entry_id}"
-        )
+        self._store = Store(self.hass, 1, f"{DOMAIN}.{self.config_entry.entry_id}")
         stored: dict = await self._store.async_load() or {}
         if stored.get("initial_import_done", False):
             self._is_first_refresh = False
-            _LOGGER.debug(
-                "Skipping full first-refresh — initial import already done"
-            )
+            _LOGGER.debug("Skipping full first-refresh — initial import already done")
 
     async def async_refresh_interval_only(self) -> None:
         """Refresh only interval data (skip AMI data)."""

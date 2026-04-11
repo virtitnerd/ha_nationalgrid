@@ -370,7 +370,11 @@ def _build_hourly_stat_list(
     consumption_only: bool = False,
     return_only: bool = False,
 ) -> tuple[list[StatisticData], float]:
-    """Build sorted StatisticData list from AMI readings.
+    """Build hourly StatisticData from AMI readings, aggregating sub-hour intervals.
+
+    HA statistics require top-of-hour timestamps (minutes and seconds must be 0).
+    15-min readings within the same clock hour are summed into a single
+    StatisticData entry.
 
     Returns (stats_list, running_sum).
     """
@@ -378,8 +382,9 @@ def _build_hourly_stat_list(
         readings,
         key=lambda r: str(r.get("date", "")),
     )
-    stats: list[StatisticData] = []
-    running_sum = last_sum
+
+    # Accumulate quantities per top-of-hour bucket
+    hourly: dict[datetime, float] = {}
     skipped_already = 0
     skipped_filtered = 0
 
@@ -402,12 +407,22 @@ def _build_hourly_stat_list(
         if dt is None:
             continue
 
-        if dt.timestamp() <= last_ts:
+        # HA statistics require top-of-hour timestamps
+        bucket = dt.replace(minute=0, second=0, microsecond=0)
+
+        if bucket.timestamp() <= last_ts:
             skipped_already += 1
             continue
 
-        running_sum += quantity
-        stats.append(StatisticData(start=dt, state=quantity, sum=running_sum))
+        hourly[bucket] = hourly.get(bucket, 0.0) + quantity
+
+    stats: list[StatisticData] = []
+    running_sum = last_sum
+
+    for bucket_dt in sorted(hourly):
+        hour_total = hourly[bucket_dt]
+        running_sum += hour_total
+        stats.append(StatisticData(start=bucket_dt, state=hour_total, sum=running_sum))
 
     if skipped_already > 0:
         _LOGGER.debug(

@@ -76,9 +76,10 @@ async def test_import_hourly_stats(mock_get_instance, mock_add_stats, hass) -> N
     metadata = mock_add_stats.call_args[0][1]
     stats = mock_add_stats.call_args[0][2]
     assert metadata["statistic_id"] == "national_grid:SP1_electric_hourly_usage"
-    assert len(stats) == 2
-    assert stats[0]["state"] == 5.0
-    assert stats[1]["sum"] == 8.0
+    # Both readings fall within the same clock hour so they are bucketed into one stat
+    assert len(stats) == 1
+    assert stats[0]["state"] == 8.0  # 5.0 + 3.0 aggregated into the 10:00 bucket
+    assert stats[0]["sum"] == 8.0
 
 
 @patch("custom_components.national_grid.statistics.async_add_external_statistics")

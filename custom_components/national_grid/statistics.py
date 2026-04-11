@@ -140,9 +140,8 @@ async def async_import_all_statistics(
     )
 
     _LOGGER.info(
-        "Importing statistics: %s AMI meters, %s interval meters, mode=%s",
+        "Importing statistics: %s AMI meters, mode=%s",
         len(data.ami_usages),
-        len(data.interval_reads),
         mode,
     )
 

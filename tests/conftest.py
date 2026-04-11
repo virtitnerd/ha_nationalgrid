@@ -95,32 +95,22 @@ def _mock_costs() -> list[dict]:
         {
             "fuelType": "ELECTRIC",
             "month": 202501,
-            "totalCost": 120.50,
+            "amount": 120.50,
         },
         {
             "fuelType": "GAS",
             "month": 202501,
-            "totalCost": 45.00,
+            "amount": 45.00,
         },
     ]
 
 
 def _mock_ami_usages() -> list[dict]:
-    """Return mock AMI usages."""
+    """Return mock AMI 15-min usages."""
     return [
         {
-            "date": "2025-01-15",
-            "usage": 18.5,
-        },
-    ]
-
-
-def _mock_interval_reads() -> list[dict]:
-    """Return mock interval reads."""
-    return [
-        {
-            "startDateTime": "2025-01-15T00:00:00",
-            "endDateTime": "2025-01-15T00:15:00",
-            "value": 0.25,
+            "date": "2025-01-15T12:00:00.000Z",
+            "fuelType": "Electric",
+            "quantity": 18.5,
         },
     ]

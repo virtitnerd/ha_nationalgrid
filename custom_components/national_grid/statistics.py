@@ -3,26 +3,23 @@
 Creates external statistic series for energy usage:
 
 For electric meters:
-- Hourly AMI stats: Verified data from epoch; GraphQL API only returns
-  data older than ~2 days (date_to = today - 2 days UTC)
-- Interval stats: Near real-time 15-minute data from yesterday midnight UTC,
-  picking up seamlessly where hourly data leaves off
+- 15-min AMI stats (consumption and optional return): fetched via
+  get_ami_energy_usages_15min(), covering the accessible ~45-day hot-storage window.
 
 For gas meters:
-- Hourly AMI stats only (no interval data available)
+- 15-min AMI stats: same endpoint, same window.
 
 Import strategy:
-- First refresh: Import ALL available hourly data (epoch to today-2)
-- Midnight refresh: Import all data in 5-day window, continuing cumulative
+- First refresh: Import all 15-min records available (typically ~45 days)
+- Midnight refresh: Import all records in the 5-day window, continuing cumulative
   sum from before the window (catches backfilled/newly available data)
-- Incremental: Interval stats only (cleared and reimported each time)
+- Incremental: Import latest 15-min records (last 7-day fetch window)
 """
 
 from __future__ import annotations
 
-import asyncio
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -99,9 +96,11 @@ def _resolve_hourly_stat_info(
 
 
 def _parse_ami_datetime(date_str: str) -> datetime | None:
-    """Parse AMI API date string into a top-of-hour UTC datetime.
+    """Parse AMI API date string into a UTC datetime, preserving 15-min precision.
 
-    The API returns timestamps like "2026-01-31T23:00:00.000Z".
+    The API returns timestamps like "2026-01-31T23:15:00.000Z".
+    Sub-second precision is stripped; the minute is preserved so 15-min
+    interval boundaries are maintained in statistics.
     """
     try:
         # Strip fractional seconds and handle Z suffix
@@ -111,7 +110,7 @@ def _parse_ami_datetime(date_str: str) -> datetime | None:
         dt = datetime.fromisoformat(clean)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=UTC)
-        return dt.replace(minute=0, second=0, microsecond=0)
+        return dt.replace(second=0, microsecond=0)  # keep minute; drop sub-minute
     except ValueError:
         _LOGGER.debug("Could not parse AMI date: %s", date_str)
         return None
@@ -172,10 +171,6 @@ async def async_import_all_statistics(
                 force_import_all=force_hourly_import,
                 is_midnight_refresh=is_midnight_refresh,
             )
-
-    # Import interval read stats (electric only)
-    for sp, reads in data.interval_reads.items():
-        await _import_interval_stats_electric(hass, sp, reads)
 
     _LOGGER.info("Statistics import complete")
 
@@ -429,191 +424,3 @@ def _build_hourly_stat_list(
         )
 
     return stats, running_sum
-
-
-async def _import_interval_stats_electric(
-    hass: HomeAssistant,
-    service_point: str,
-    reads: list,
-) -> None:
-    """Import interval stats for electric, split by direction.
-
-    Interval stats cover from yesterday midnight UTC onward, picking up
-    seamlessly where hourly AMI data (ending at today-2) leaves off.
-    Always clears and reimports for accuracy.
-    """
-    await _import_interval_stats(
-        hass,
-        service_point,
-        reads,
-        consumption_only=True,
-    )
-
-    has_negative = any(float(r.get("value", 0)) < 0 for r in reads)
-    if has_negative:
-        await _import_interval_stats(
-            hass,
-            service_point,
-            reads,
-            return_only=True,
-        )
-
-
-async def _import_interval_stats(
-    hass: HomeAssistant,
-    service_point: str,
-    reads: list,
-    *,
-    consumption_only: bool = False,
-    return_only: bool = False,
-) -> None:
-    """Import 15-min interval stats for electric meters.
-
-    Always clears and reimports from yesterday midnight UTC, which is
-    exactly where hourly AMI data (ending at today-2) leaves off.
-    """
-    # Cutoff aligns with interval fetch start: yesterday midnight UTC.
-    # Hourly stats cover up to today-2; interval covers yesterday onward.
-    now = datetime.now(tz=UTC)
-    midnight_today = now.replace(
-        hour=0,
-        minute=0,
-        second=0,
-        microsecond=0,
-    )
-    cutoff = midnight_today - timedelta(days=1)
-    cutoff_ts = cutoff.timestamp()
-
-    if return_only:
-        stat_id = f"{DOMAIN}:{service_point}_electric_interval_return_usage"
-        stat_name = f"{service_point} Electric Interval Return Usage"
-        stat_type = "return"
-    else:
-        stat_id = f"{DOMAIN}:{service_point}_electric_interval_usage"
-        stat_name = f"{service_point} Electric Interval Usage"
-        stat_type = "consumption"
-
-    _LOGGER.info(
-        "Interval %s: cutoff=%s, reimporting within window",
-        stat_type,
-        cutoff.strftime("%Y-%m-%d %H:%M UTC"),
-    )
-
-    # Clear existing stats then yield to event loop
-    recorder = get_instance(hass)
-    recorder.async_clear_statistics([stat_id])
-    await asyncio.sleep(0)
-
-    hourly_buckets = _bucket_interval_reads(
-        reads,
-        cutoff_ts,
-        consumption_only=consumption_only,
-        return_only=return_only,
-        stat_type=stat_type,
-    )
-
-    stats: list[StatisticData] = []
-    running_sum = 0.0
-    for hour_start in sorted(hourly_buckets):
-        hour_total = hourly_buckets[hour_start]
-        running_sum += hour_total
-        stats.append(
-            StatisticData(
-                start=hour_start,
-                state=hour_total,
-                sum=running_sum,
-            )
-        )
-
-    if not stats:
-        _LOGGER.info(
-            "Interval %s: no data within 2-day window",
-            stat_type,
-        )
-        return
-
-    metadata = _build_statistic_metadata(
-        stat_id,
-        stat_name,
-        UnitOfEnergy.KILO_WATT_HOUR,
-        "energy",
-    )
-    async_add_external_statistics(hass, metadata, stats)
-
-    _LOGGER.info(
-        "Imported %s interval %s stats for %s (sum=%.3f, last 2 days only)",
-        len(stats),
-        stat_type,
-        service_point,
-        running_sum,
-    )
-
-
-def _bucket_interval_reads(
-    reads: list,
-    cutoff_ts: float,
-    *,
-    consumption_only: bool,
-    return_only: bool,
-    stat_type: str,
-) -> dict[datetime, float]:
-    """Bucket interval reads into hourly totals.
-
-    Filters by direction and cutoff timestamp.
-    """
-    hourly_buckets: dict[datetime, float] = {}
-    skipped_filtered = 0
-    skipped_old = 0
-
-    for read in reads:
-        start_str = str(read.get("startTime", ""))
-        value = float(read.get("value", 0))
-        if not start_str:
-            continue
-
-        if consumption_only and value < 0:
-            skipped_filtered += 1
-            continue
-        if return_only and value >= 0:
-            skipped_filtered += 1
-            continue
-        if return_only:
-            value = abs(value)
-
-        try:
-            dt = datetime.fromisoformat(start_str)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=UTC)
-        except ValueError:
-            _LOGGER.debug(
-                "Could not parse interval startTime: %s",
-                start_str,
-            )
-            continue
-
-        hour_start = dt.replace(
-            minute=0,
-            second=0,
-            microsecond=0,
-        )
-        if hour_start.timestamp() < cutoff_ts:
-            skipped_old += 1
-            continue
-
-        hourly_buckets[hour_start] = hourly_buckets.get(hour_start, 0.0) + value
-
-    if skipped_filtered > 0:
-        label = "consumption" if consumption_only else "return"
-        _LOGGER.debug(
-            "Filtered %s interval readings (keeping %s only)",
-            skipped_filtered,
-            label,
-        )
-    if skipped_old > 0:
-        _LOGGER.info(
-            "Interval %s: skipped %s readings older than cutoff",
-            stat_type,
-            skipped_old,
-        )
-
-    return hourly_buckets

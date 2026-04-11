@@ -7,13 +7,13 @@ from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from aionatgrid.exceptions import (
-    InvalidAuthError,
-    NationalGridError,
-)
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
+from py_nationalgrid.exceptions import (
+    InvalidAuthError,
+    NationalGridError,
+)
 
 from custom_components.national_grid.const import (
     _LOGGER,
@@ -30,7 +30,6 @@ from .conftest import (
     _mock_ami_usages,
     _mock_billing_account,
     _mock_costs,
-    _mock_interval_reads,
     _mock_usages,
 )
 
@@ -63,13 +62,12 @@ def _make_coordinator(
 
 
 def _make_api() -> AsyncMock:
-    """Create a mock aionatgrid client."""
+    """Create a mock py_nationalgrid client."""
     api = AsyncMock()
     api.get_billing_account = AsyncMock(return_value=_mock_billing_account())
     api.get_energy_usages = AsyncMock(return_value=_mock_usages())
     api.get_energy_usage_costs = AsyncMock(return_value=_mock_costs())
-    api.get_ami_energy_usages = AsyncMock(return_value=_mock_ami_usages())
-    api.get_interval_reads = AsyncMock(return_value=_mock_interval_reads())
+    api.get_ami_energy_usages_15min = AsyncMock(return_value=_mock_ami_usages())
     return api
 
 
@@ -279,27 +277,15 @@ async def test_fetch_costs_no_region(hass: HomeAssistant) -> None:
 
 
 async def test_fetch_ami_error_graceful(hass: HomeAssistant) -> None:
-    """Test _fetch_all_data handles AMI error gracefully."""
+    """Test _fetch_all_data handles 15-min AMI error gracefully."""
     api = _make_api()
-    api.get_ami_energy_usages = AsyncMock(
+    api.get_ami_energy_usages_15min = AsyncMock(
         side_effect=NationalGridError("ami fail"),
     )
     coordinator = _make_coordinator(hass, api)
     data = await coordinator._async_update_data()
     # AMI usages should not contain the service point that failed
     assert MOCK_SERVICE_POINT not in data.ami_usages
-
-
-async def test_fetch_interval_reads_error_graceful(hass: HomeAssistant) -> None:
-    """Test _fetch_all_data handles interval reads error gracefully."""
-    api = _make_api()
-    api.get_interval_reads = AsyncMock(
-        side_effect=NationalGridError("interval fail"),
-    )
-    coordinator = _make_coordinator(hass, api)
-    data = await coordinator._async_update_data()
-    # Interval reads should not contain the service point that failed
-    assert MOCK_SERVICE_POINT not in data.interval_reads
 
 
 async def test_get_meter_data_none_when_no_data(hass: HomeAssistant) -> None:

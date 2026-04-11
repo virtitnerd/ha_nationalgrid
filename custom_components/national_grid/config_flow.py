@@ -5,16 +5,16 @@ from __future__ import annotations
 from typing import Any
 
 import voluptuous as vol
-from aionatgrid import NationalGridClient, NationalGridConfig, create_cookie_jar
-from aionatgrid.exceptions import (
-    CannotConnectError,
-    InvalidAuthError,
-    NationalGridError,
-)
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
+from py_nationalgrid import NationalGridClient, NationalGridConfig, create_cookie_jar
+from py_nationalgrid.exceptions import (
+    CannotConnectError,
+    InvalidAuthError,
+    NationalGridError,
+)
 from slugify import slugify
 
 from .const import _LOGGER, CONF_SELECTED_ACCOUNTS, DOMAIN

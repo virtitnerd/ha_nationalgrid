@@ -12,6 +12,7 @@ from custom_components.national_grid.coordinator import (
 from custom_components.national_grid.statistics import (
     _parse_ami_datetime,
     async_import_all_statistics,
+    async_import_meter_statistics,
 )
 
 
@@ -252,3 +253,94 @@ def test_parse_ami_datetime_bad_input() -> None:
     """Test that unparseable dates return None."""
     assert _parse_ami_datetime("not-a-date") is None
     assert _parse_ami_datetime("") is None
+
+
+# ---------------------------------------------------------------------------
+# async_import_meter_statistics tests
+# ---------------------------------------------------------------------------
+
+
+@patch("custom_components.national_grid.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid.statistics.get_instance")
+async def test_import_meter_statistics_electric(
+    mock_get_instance, mock_add_stats, hass
+) -> None:
+    """Test async_import_meter_statistics imports electric stats for one SP."""
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
+
+    readings = [{"date": "2025-01-15T10:00:00.000Z", "quantity": 7.0}]
+    coordinator = MagicMock()
+    coordinator.data = _make_coordinator_data(
+        ami_usages={"SP1": readings},
+        meters={"SP1": _make_meter_data("Electric")},
+    )
+
+    await async_import_meter_statistics(hass, coordinator, "SP1", force_import_all=True)
+
+    assert mock_add_stats.called
+    metadata = mock_add_stats.call_args[0][1]
+    stats = mock_add_stats.call_args[0][2]
+    assert metadata["statistic_id"] == "national_grid:SP1_electric_hourly_usage"
+    assert stats[0]["state"] == 7.0
+
+
+@patch("custom_components.national_grid.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid.statistics.get_instance")
+async def test_import_meter_statistics_gas(
+    mock_get_instance, mock_add_stats, hass
+) -> None:
+    """Test async_import_meter_statistics imports gas stats for one SP."""
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
+
+    readings = [{"date": "2025-01-15T10:00:00.000Z", "quantity": 4.0}]
+    coordinator = MagicMock()
+    coordinator.data = _make_coordinator_data(
+        ami_usages={"SP1": readings},
+        meters={"SP1": _make_meter_data("Gas")},
+    )
+
+    await async_import_meter_statistics(hass, coordinator, "SP1", force_import_all=True)
+
+    assert mock_add_stats.called
+    metadata = mock_add_stats.call_args[0][1]
+    assert metadata["statistic_id"] == "national_grid:SP1_gas_hourly_usage"
+
+
+async def test_import_meter_statistics_no_data(hass) -> None:
+    """Test async_import_meter_statistics is a no-op when coordinator has no data."""
+    coordinator = MagicMock()
+    coordinator.data = None
+
+    # Should not raise
+    await async_import_meter_statistics(hass, coordinator, "SP1")
+
+
+async def test_import_meter_statistics_no_readings(hass) -> None:
+    """Test async_import_meter_statistics is a no-op when AMI readings are absent."""
+    coordinator = MagicMock()
+    coordinator.data = _make_coordinator_data(
+        ami_usages={},
+        meters={"SP1": _make_meter_data("Electric")},
+    )
+
+    # Should not raise and should not call add_external_statistics
+    with patch(
+        "custom_components.national_grid.statistics.async_add_external_statistics"
+    ) as mock_add:
+        await async_import_meter_statistics(hass, coordinator, "SP1")
+        assert not mock_add.called
+
+
+async def test_import_meter_statistics_unknown_sp(hass) -> None:
+    """Test async_import_meter_statistics is a no-op for unknown service point."""
+    coordinator = MagicMock()
+    coordinator.data = _make_coordinator_data(
+        ami_usages={"SP1": [{"date": "2025-01-15T10:00:00.000Z", "quantity": 5.0}]},
+        meters={},  # SP1 not in meters
+    )
+
+    with patch(
+        "custom_components.national_grid.statistics.async_add_external_statistics"
+    ) as mock_add:
+        await async_import_meter_statistics(hass, coordinator, "SP1")
+        assert not mock_add.called

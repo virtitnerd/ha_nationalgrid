@@ -116,6 +116,50 @@ def _parse_ami_datetime(date_str: str) -> datetime | None:
         return None
 
 
+async def async_import_meter_statistics(
+    hass: HomeAssistant,
+    coordinator: NationalGridDataUpdateCoordinator,
+    service_point: str,
+    *,
+    force_import_all: bool = False,
+) -> None:
+    """Import statistics for a single service point.
+
+    Used by the Force Refresh button and coordinator.async_force_refresh_meter()
+    to re-import one meter's history without touching any other meters.
+    """
+    data = coordinator.data
+    if data is None:
+        return
+    ami_readings = data.ami_usages.get(service_point, [])
+    if not ami_readings:
+        _LOGGER.debug("No AMI readings for %s — nothing to import", service_point)
+        return
+    meter_data = data.meters.get(service_point)
+    if meter_data is None:
+        _LOGGER.debug("No meter data for %s — skipping import", service_point)
+        return
+
+    fuel_type = str(meter_data.meter.get("fuelType", ""))
+    is_gas = fuel_type == "Gas"
+
+    if is_gas:
+        await _import_hourly_stats(
+            hass,
+            service_point,
+            ami_readings,
+            is_gas=True,
+            force_import_all=force_import_all,
+        )
+    else:
+        await _import_hourly_stats_electric(
+            hass,
+            service_point,
+            ami_readings,
+            force_import_all=force_import_all,
+        )
+
+
 async def async_import_all_statistics(
     hass: HomeAssistant,
     coordinator: NationalGridDataUpdateCoordinator,

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from py_nationalgrid import NationalGridClient, NationalGridConfig, create_cookie_jar
 from py_nationalgrid.exceptions import (
@@ -17,7 +18,7 @@ from py_nationalgrid.exceptions import (
     RetryExhaustedError,
 )
 
-from .const import _LOGGER, CONF_SELECTED_ACCOUNTS
+from .const import _LOGGER, CONF_SELECTED_ACCOUNTS, DOMAIN
 
 if TYPE_CHECKING:
     import logging
@@ -87,6 +88,24 @@ class NationalGridDataUpdateCoordinator(
         self._interval_only_mode = False  # When True, only fetch interval reads
         self._is_midnight_refresh = False  # When True, force full hourly import
         self._pending_full_refresh = False  # Retry flag for failed full refreshes
+        self._store: Store | None = None  # Initialised in async_initialize()
+
+    async def async_initialize(self) -> None:
+        """Load persisted state and configure initial refresh mode.
+
+        Must be called after config_entry is set, before the first refresh.
+        Reads from HA storage so that a completed initial import is not
+        re-run on every Home Assistant restart.
+        """
+        self._store = Store(
+            self.hass, 1, f"{DOMAIN}.{self.config_entry.entry_id}"
+        )
+        stored: dict = await self._store.async_load() or {}
+        if stored.get("initial_import_done", False):
+            self._is_first_refresh = False
+            _LOGGER.debug(
+                "Skipping full first-refresh — initial import already done"
+            )
 
     async def async_refresh_interval_only(self) -> None:
         """Refresh only interval data (skip AMI data)."""
@@ -222,10 +241,13 @@ class NationalGridDataUpdateCoordinator(
                 ami_count,
             )
 
-        # After first successful refresh, mark as complete
+        # After first successful refresh, mark as complete and persist so
+        # subsequent HA restarts skip the slow epoch→today AMI fetch.
         if self._is_first_refresh:
             self._is_first_refresh = False
             _LOGGER.info("First refresh complete - switching to incremental updates")
+            if self._store is not None:
+                await self._store.async_save({"initial_import_done": True})
 
         return data
 
@@ -609,8 +631,55 @@ class NationalGridDataUpdateCoordinator(
         This sets the first refresh flag to True, which will cause the next
         refresh to fetch full historical data instead of just recent incremental
         data. Useful for recovering from data gaps or re-importing statistics.
+        Also clears the persisted storage flag so the next HA restart also
+        performs a full import.
         """
         _LOGGER.info(
             "Resetting coordinator to first refresh mode for full historical import"
         )
         self._is_first_refresh = True
+        if self._store is not None:
+            self.hass.async_create_task(
+                self._store.async_save({"initial_import_done": False})
+            )
+
+    async def async_force_refresh_meter(self, service_point: str) -> None:
+        """Fetch full AMI history for one meter and re-import its statistics.
+
+        Used by the Force Refresh button entity. Fetches from epoch (as if it
+        were a first refresh) for just the given service point, then re-imports
+        that meter's statistics with force_import_all=True.
+        """
+        if self.data is None:
+            _LOGGER.warning(
+                "Force refresh: coordinator has no data yet for meter %s",
+                service_point,
+            )
+            return
+        meter_data = self.get_meter_data(service_point)
+        if meter_data is None:
+            _LOGGER.warning(
+                "Force refresh: meter %s not found in coordinator data", service_point
+            )
+            return
+
+        today = datetime.now(tz=UTC).date()
+        premise_number = str(meter_data.billing_account.get("premiseNumber", ""))
+
+        _LOGGER.info("Force refresh triggered for meter %s", service_point)
+        await self._fetch_ami_15min_data(
+            meter=meter_data.meter,
+            premise_number=premise_number,
+            sp=service_point,
+            today=today,
+            ami_usages=self.data.ami_usages,
+            is_first_refresh=True,  # always fetch from epoch
+        )
+
+        # Import stats for just this meter (deferred import avoids circular import
+        # at module level; statistics.py imports coordinator only under TYPE_CHECKING)
+        from .statistics import async_import_meter_statistics  # noqa: PLC0415
+
+        await async_import_meter_statistics(
+            self.hass, self, service_point, force_import_all=True
+        )

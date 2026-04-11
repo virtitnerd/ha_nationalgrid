@@ -408,3 +408,114 @@ async def test_get_latest_ami_usage_no_readings(hass: HomeAssistant) -> None:
     coordinator = _make_coordinator(hass, api)
     coordinator.data = await coordinator._async_update_data()
     assert coordinator.get_latest_ami_usage("NONEXISTENT_SP") is None
+
+
+# ---------------------------------------------------------------------------
+# async_initialize tests
+# ---------------------------------------------------------------------------
+
+
+@patch("custom_components.national_grid.coordinator.Store")
+async def test_async_initialize_skips_first_refresh_when_done(
+    mock_store_cls, hass: HomeAssistant
+) -> None:
+    """Test async_initialize sets _is_first_refresh=False when flag is persisted."""
+    mock_store = AsyncMock()
+    mock_store.async_load = AsyncMock(return_value={"initial_import_done": True})
+    mock_store_cls.return_value = mock_store
+
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    assert coordinator._is_first_refresh is True  # default
+
+    await coordinator.async_initialize()
+
+    assert coordinator._is_first_refresh is False
+
+
+@patch("custom_components.national_grid.coordinator.Store")
+async def test_async_initialize_allows_first_refresh_when_not_done(
+    mock_store_cls, hass: HomeAssistant
+) -> None:
+    """Test async_initialize keeps _is_first_refresh=True when flag is absent."""
+    mock_store = AsyncMock()
+    mock_store.async_load = AsyncMock(return_value={})
+    mock_store_cls.return_value = mock_store
+
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+
+    await coordinator.async_initialize()
+
+    assert coordinator._is_first_refresh is True
+
+
+@patch("custom_components.national_grid.coordinator.Store")
+async def test_async_initialize_allows_first_refresh_when_store_empty(
+    mock_store_cls, hass: HomeAssistant
+) -> None:
+    """Test async_initialize keeps _is_first_refresh=True when store returns None."""
+    mock_store = AsyncMock()
+    mock_store.async_load = AsyncMock(return_value=None)
+    mock_store_cls.return_value = mock_store
+
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+
+    await coordinator.async_initialize()
+
+    assert coordinator._is_first_refresh is True
+
+
+# ---------------------------------------------------------------------------
+# async_force_refresh_meter tests
+# ---------------------------------------------------------------------------
+
+
+@patch(
+    "custom_components.national_grid.statistics.async_import_meter_statistics",
+    new_callable=AsyncMock,
+)
+async def test_async_force_refresh_meter_fetches_from_epoch(
+    mock_import, hass: HomeAssistant
+) -> None:
+    """Test force refresh fetches AMI from epoch and calls stat import."""
+    from datetime import date
+
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = await coordinator._async_update_data()
+
+    await coordinator.async_force_refresh_meter(MOCK_SERVICE_POINT)
+
+    # get_ami_energy_usages_15min should have been called with date_from=epoch
+    call_kwargs = api.get_ami_energy_usages_15min.call_args
+    assert call_kwargs.kwargs["date_from"] == date(1970, 1, 1)
+
+    # Statistics import should have been called for this service point
+    mock_import.assert_called_once()
+    _, kwargs = mock_import.call_args
+    assert kwargs.get("force_import_all") is True
+
+
+async def test_async_force_refresh_meter_no_data(hass: HomeAssistant) -> None:
+    """Test force refresh is a no-op when coordinator has no data."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = None
+
+    # Should not raise
+    await coordinator.async_force_refresh_meter(MOCK_SERVICE_POINT)
+    # API should not have been called a second time
+    api.get_ami_energy_usages_15min.assert_not_called()
+
+
+async def test_async_force_refresh_meter_unknown_sp(hass: HomeAssistant) -> None:
+    """Test force refresh is a no-op for unknown service point."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = await coordinator._async_update_data()
+
+    call_count_before = api.get_ami_energy_usages_15min.call_count
+    await coordinator.async_force_refresh_meter("UNKNOWN_SP")
+    assert api.get_ami_energy_usages_15min.call_count == call_count_before

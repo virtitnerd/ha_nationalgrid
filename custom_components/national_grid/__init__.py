@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
+    Platform.BUTTON,
     Platform.SENSOR,
 ]
 
@@ -54,6 +55,7 @@ async def async_setup_entry(
         password=entry.data[CONF_PASSWORD],
     )
     coordinator.config_entry = entry
+    await coordinator.async_initialize()
 
     entry.runtime_data = coordinator
 

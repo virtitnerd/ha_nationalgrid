@@ -11,7 +11,7 @@ from .const import ATTRIBUTION, DOMAIN
 from .coordinator import NationalGridDataUpdateCoordinator
 
 if TYPE_CHECKING:
-    from aionatgrid.models import BillingAccount, Meter
+    from py_nationalgrid.models import BillingAccount, Meter
 
 
 class NationalGridEntity(CoordinatorEntity[NationalGridDataUpdateCoordinator]):

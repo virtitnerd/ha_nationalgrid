@@ -29,6 +29,7 @@ if TYPE_CHECKING:
         BillingAccount,
         EnergyUsage,
         EnergyUsageCost,
+        IntervalRead,
         Meter,
     )
 
@@ -54,10 +55,12 @@ class NationalGridCoordinatorData:
     accounts: dict[str, BillingAccount]
     ami_usages: dict[str, list[AmiEnergyUsage]] = field(default_factory=dict)
     costs: dict[str, list[EnergyUsageCost]] = field(default_factory=dict)
+    interval_reads: dict[str, list[IntervalRead]] = field(default_factory=dict)
     meters: dict[str, MeterData] = field(default_factory=dict)
     usages: dict[str, list[EnergyUsage]] = field(default_factory=dict)
     is_first_refresh: bool = False
-    is_midnight_refresh: bool = False  # Midnight refresh: force full hourly import
+    # Midnight refresh: force full hourly import + clear/reimport interval stats
+    is_midnight_refresh: bool = False
 
 
 class NationalGridDataUpdateCoordinator(
@@ -225,16 +228,19 @@ class NationalGridDataUpdateCoordinator(
 
         # Log completion at INFO level with summary
         if self._interval_only_mode:
-            ami_count = sum(len(a) for a in data.ami_usages.values())
+            interval_count = sum(len(r) for r in data.interval_reads.values())
             _LOGGER.info(
-                "Interval-only refresh complete: %s AMI 15-min records fetched",
-                ami_count,
+                "Interval-only refresh complete: %s interval reads fetched",
+                interval_count,
             )
         else:
             ami_count = sum(len(a) for a in data.ami_usages.values())
+            interval_count = sum(len(r) for r in data.interval_reads.values())
             _LOGGER.info(
-                "Full refresh complete: %s AMI 15-min records fetched",
+                "Full refresh complete: %s AMI 15-min records,"
+                " %s interval reads fetched",
                 ami_count,
+                interval_count,
             )
 
         # After first successful refresh, mark as complete and persist so
@@ -256,6 +262,7 @@ class NationalGridDataUpdateCoordinator(
             accounts=dict(prev.accounts),
             ami_usages=dict(prev.ami_usages),
             costs=dict(prev.costs),
+            interval_reads=dict(prev.interval_reads),
             meters=dict(prev.meters),
             usages=dict(prev.usages),
         )
@@ -305,12 +312,15 @@ class NationalGridDataUpdateCoordinator(
                 account_id, today, billing_account
             )
 
-        # Fetch AMI 15-min data for AMI-capable meters.
+        # Fetch AMI and interval read data for AMI-capable meters.
+        # In interval-only mode: skips slow GraphQL AMI fetch, does interval reads only.
+        # In full mode: fetches both AMI 15-min data and interval reads.
         await self._fetch_ami_data(
             billing_account,
             meter_nodes,
             today,
             data.ami_usages,
+            data.interval_reads,
             is_first_refresh=data.is_first_refresh,
         )
 
@@ -389,16 +399,22 @@ class NationalGridDataUpdateCoordinator(
         else:
             return account_costs
 
-    async def _fetch_ami_data(
+    async def _fetch_ami_data(  # noqa: PLR0913
         self,
         billing_account: BillingAccount,
         meter_nodes: list[Meter],
         today: date,
         ami_usages: dict[str, list[AmiEnergyUsage]],
+        interval_reads: dict[str, list[IntervalRead]],
         *,
         is_first_refresh: bool = False,
     ) -> None:
-        """Fetch AMI 15-minute data for all AMI-capable meters in an account."""
+        """Fetch AMI and interval read data for all AMI-capable meters in an account.
+
+        In full mode: fetches both AMI 15-min (GraphQL) and interval reads (REST).
+        In interval-only mode: skips the slow AMI GraphQL fetch; interval reads only.
+        Interval reads are always fetched for electric meters regardless of mode.
+        """
         premise_number = str(billing_account.get("premiseNumber", ""))
         for meter in meter_nodes:
             if not meter.get("hasAmiSmartMeter"):
@@ -407,14 +423,83 @@ class NationalGridDataUpdateCoordinator(
             if not sp:
                 continue
 
-            await self._fetch_ami_15min_data(
-                meter,
-                premise_number,
-                sp,
-                today,
-                ami_usages,
-                is_first_refresh=is_first_refresh,
+            # Skip slow GraphQL AMI fetch in interval-only mode
+            # (AMI data only updates once daily around midnight)
+            if not self._interval_only_mode:
+                await self._fetch_ami_15min_data(
+                    meter,
+                    premise_number,
+                    sp,
+                    today,
+                    ami_usages,
+                    is_first_refresh=is_first_refresh,
+                )
+
+            # Always fetch interval reads for electric meters (fast REST endpoint)
+            await self._fetch_interval_reads(meter, premise_number, sp, interval_reads)
+
+    async def _fetch_interval_reads(
+        self,
+        meter: Meter,
+        premise_number: str,
+        sp: str,
+        interval_reads: dict[str, list[IntervalRead]],
+    ) -> None:
+        """Fetch interval reads for a single electric meter.
+
+        The AMIAdapter REST API provides near-real-time 15-minute data.
+        Gas meters are skipped (the endpoint returns 404 for them).
+        Fetches from yesterday midnight UTC so interval reads pick up
+        seamlessly where hourly AMI data leaves off.
+        """
+        # Interval reads are for electric meters only.
+        fuel_type = str(meter.get("fuelType", ""))
+        if fuel_type == "Gas":
+            return
+
+        try:
+            now = datetime.now(tz=UTC)
+            # Start from yesterday midnight UTC — interval covers yesterday through now,
+            # picking up where verified AMI data leaves off.
+            yesterday_midnight = (now - timedelta(days=1)).replace(
+                hour=0, minute=0, second=0, microsecond=0
             )
+
+            reads = await self.api.get_interval_reads(
+                premise_number=premise_number,
+                service_point_number=sp,
+                start_datetime=yesterday_midnight,
+            )
+            interval_reads[sp] = reads
+
+            if reads:
+                times = [r.get("startTime") for r in reads if r.get("startTime")]
+                if times:
+                    min_t = min(times)
+                    max_t = max(times)
+                    _LOGGER.debug(
+                        "Fetched %s interval reads for meter %s (range: %s to %s)",
+                        len(reads),
+                        sp,
+                        min_t[:_DATETIME_LOG_LEN]
+                        if len(min_t) > _DATETIME_LOG_LEN
+                        else min_t,
+                        max_t[:_DATETIME_LOG_LEN]
+                        if len(max_t) > _DATETIME_LOG_LEN
+                        else max_t,
+                    )
+                else:
+                    _LOGGER.debug(
+                        "Fetched %s interval reads for meter %s", len(reads), sp
+                    )
+            else:
+                _LOGGER.debug("No interval reads returned for meter %s", sp)
+        except (
+            CannotConnectError,
+            RetryExhaustedError,
+            NationalGridError,
+        ) as err:
+            _LOGGER.debug("Could not fetch interval reads for meter %s: %s", sp, err)
 
     async def _fetch_ami_15min_data(  # noqa: PLR0913
         self,

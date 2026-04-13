@@ -1,5 +1,10 @@
 # National Grid Integration for Home Assistant
 
+[![GitHub Release](https://img.shields.io/github/v/release/virtitnerd/ha_nationalgrid?style=flat-square)](https://github.com/virtitnerd/ha_nationalgrid/releases)
+[![License](https://img.shields.io/github/license/virtitnerd/ha_nationalgrid?style=flat-square)](LICENSE)
+[![Last Commit](https://img.shields.io/github/last-commit/virtitnerd/ha_nationalgrid?style=flat-square)](https://github.com/virtitnerd/ha_nationalgrid/commits/main)
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg?style=flat-square)](https://hacs.xyz/)
+
 A custom [Home Assistant](https://www.home-assistant.io/) integration that provides energy usage, cost, and 15-minute AMI meter data from [National Grid](https://www.nationalgridus.com/) utility accounts. It uses the [py-nationalgrid](https://github.com/virtitnerd/py-nationalgrid) library to communicate with National Grid's GraphQL API.
 
 This is a fork of [ryanmorash/ha_nationalgrid](https://github.com/ryanmorash/ha_nationalgrid), updated to use the actively maintained `py-nationalgrid` library and rebuilt around the 15-minute AMI data endpoint.
@@ -116,24 +121,32 @@ A full data fetch including:
 
 ### Hourly Refresh (01:18 - 23:18)
 
-An incremental fetch of:
+A fast incremental fetch of near-real-time interval reads for electric meters:
 
-- AMI 15-minute data for the last 7 days per meter (catches any backfilled data)
+- Interval reads from yesterday midnight UTC through now (REST endpoint, typically completes in under a second)
+- Interval statistics are **cleared and reimported** on every hourly refresh so provisional data never accumulates
 
 ## Long-Term Statistics
 
-All 15-minute AMI readings are **aggregated into hourly buckets** before being stored, as required by Home Assistant's recorder. The running cumulative sum is maintained correctly across all readings.
+All readings are aggregated into hourly buckets before being stored, as required by Home Assistant's recorder.
+
+The integration maintains **two separate stat series** per electric meter:
+
+- **Hourly AMI stats** — verified/settled data from the AMI GraphQL endpoint. Grows permanently; only new readings are appended.
+- **Interval stats** — near-real-time data from the REST interval endpoint, covering yesterday midnight through now. Cleared and reimported on every refresh; bridges the gap until AMI data catches up.
 
 ### Electric Meters
 
-| Statistic ID                                      | Description                   | History    |
-| ------------------------------------------------- | ----------------------------- | ---------- |
-| `national_grid:{sp}_electric_hourly_usage`        | Consumption (kWh, aggregated) | ~45 days   |
-| `national_grid:{sp}_electric_return_hourly_usage` | Return to grid / solar (kWh)  | ~45 days   |
+| Statistic ID                                             | Description                              | Window       |
+| -------------------------------------------------------- | ---------------------------------------- | ------------ |
+| `national_grid:{sp}_electric_hourly_usage`               | Consumption — verified AMI data (kWh)    | ~45 days     |
+| `national_grid:{sp}_electric_return_hourly_usage`        | Return to grid / solar — verified (kWh)  | ~45 days     |
+| `national_grid:{sp}_electric_interval_usage`             | Consumption — near real-time (kWh)       | ~2 days      |
+| `national_grid:{sp}_electric_interval_return_usage`      | Return to grid / solar — real-time (kWh) | ~2 days      |
 
 ### Gas Meters
 
-| Statistic ID                          | Description               | History  |
+| Statistic ID                          | Description               | Window   |
 | ------------------------------------- | ------------------------- | -------- |
 | `national_grid:{sp}_gas_hourly_usage` | Gas consumption (CCF)     | ~45 days |
 

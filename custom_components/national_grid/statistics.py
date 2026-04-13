@@ -18,8 +18,9 @@ Import strategy:
 
 from __future__ import annotations
 
+import asyncio
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -96,9 +97,10 @@ def _resolve_hourly_stat_info(
 
 
 def _parse_ami_datetime(date_str: str) -> datetime | None:
-    """Parse AMI API date string into a UTC datetime, preserving 15-min precision.
+    """Parse an API date string into a UTC datetime, preserving 15-min precision.
 
-    The API returns timestamps like "2026-01-31T23:15:00.000Z".
+    Handles both AMI timestamps ("2026-01-31T23:15:00.000Z") and interval-read
+    timestamps ("2026-01-22T13:00:00-05:00"). All results are normalised to UTC.
     Sub-second precision is stripped; the minute is preserved so 15-min
     interval boundaries are maintained in statistics.
     """
@@ -108,8 +110,7 @@ def _parse_ami_datetime(date_str: str) -> datetime | None:
         if clean.endswith("Z"):
             clean = clean[:-1] + "+00:00"
         dt = datetime.fromisoformat(clean)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC)
+        dt = dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
         return dt.replace(second=0, microsecond=0)  # keep minute; drop sub-minute
     except ValueError:
         _LOGGER.debug("Could not parse AMI date: %s", date_str)
@@ -184,8 +185,9 @@ async def async_import_all_statistics(
     )
 
     _LOGGER.info(
-        "Importing statistics: %s AMI meters, mode=%s",
+        "Importing statistics: %s AMI meters, %s interval meters, mode=%s",
         len(data.ami_usages),
+        len(data.interval_reads),
         mode,
     )
 
@@ -214,6 +216,10 @@ async def async_import_all_statistics(
                 force_import_all=force_hourly_import,
                 is_midnight_refresh=is_midnight_refresh,
             )
+
+    # Import interval read stats (electric only; always cleared and reimported)
+    for sp, reads in data.interval_reads.items():
+        await _import_interval_stats_electric(hass, sp, reads)
 
     _LOGGER.info("Statistics import complete")
 
@@ -482,3 +488,173 @@ def _build_hourly_stat_list(
         )
 
     return stats, running_sum
+
+
+async def _import_interval_stats_electric(
+    hass: HomeAssistant,
+    service_point: str,
+    reads: list,
+) -> None:
+    """Import interval stats for electric meters, split by direction.
+
+    Interval stats cover from yesterday midnight UTC onward, bridging the gap
+    between verified AMI data (ending ~2 days ago) and real-time. Always
+    clears and reimports so stale provisional data never accumulates.
+    """
+    await _import_interval_stats(
+        hass,
+        service_point,
+        reads,
+        consumption_only=True,
+    )
+
+    has_negative = any(float(r.get("value", 0)) < 0 for r in reads)
+    if has_negative:
+        await _import_interval_stats(
+            hass,
+            service_point,
+            reads,
+            return_only=True,
+        )
+
+
+async def _import_interval_stats(
+    hass: HomeAssistant,
+    service_point: str,
+    reads: list,
+    *,
+    consumption_only: bool = False,
+    return_only: bool = False,
+) -> None:
+    """Import 15-min interval stats for a single electric meter.
+
+    Always clears and reimports from yesterday midnight UTC. This covers the
+    near-real-time window that verified AMI data does not yet include.
+    The stat series is separate from the hourly AMI series so the two
+    never overlap or corrupt each other.
+    """
+    now = datetime.now(tz=UTC)
+    cutoff = (now - timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    cutoff_ts = cutoff.timestamp()
+
+    if return_only:
+        stat_id = f"{DOMAIN}:{service_point}_electric_interval_return_usage"
+        stat_name = f"{service_point} Electric Interval Return Usage"
+        stat_type = "return"
+    else:
+        stat_id = f"{DOMAIN}:{service_point}_electric_interval_usage"
+        stat_name = f"{service_point} Electric Interval Usage"
+        stat_type = "consumption"
+
+    _LOGGER.info(
+        "Interval %s: cutoff=%s, clearing and reimporting",
+        stat_type,
+        cutoff.strftime("%Y-%m-%d %H:%M UTC"),
+    )
+
+    # Clear existing stats then yield to event loop before writing new ones
+    recorder = get_instance(hass)
+    recorder.async_clear_statistics([stat_id])
+    await asyncio.sleep(0)
+
+    hourly_buckets = _bucket_interval_reads(
+        reads,
+        cutoff_ts,
+        consumption_only=consumption_only,
+        return_only=return_only,
+        stat_type=stat_type,
+    )
+
+    stats: list[StatisticData] = []
+    running_sum = 0.0
+    for hour_start in sorted(hourly_buckets):
+        hour_total = hourly_buckets[hour_start]
+        running_sum += hour_total
+        stats.append(StatisticData(start=hour_start, state=hour_total, sum=running_sum))
+
+    if not stats:
+        _LOGGER.info(
+            "Interval %s: no data within window for %s", stat_type, service_point
+        )
+        return
+
+    metadata = _build_statistic_metadata(
+        stat_id,
+        stat_name,
+        UnitOfEnergy.KILO_WATT_HOUR,
+        "energy",
+    )
+    async_add_external_statistics(hass, metadata, stats)
+
+    _LOGGER.info(
+        "Imported %s interval %s stats for %s (sum=%.3f)",
+        len(stats),
+        stat_type,
+        service_point,
+        running_sum,
+    )
+
+
+def _bucket_interval_reads(
+    reads: list,
+    cutoff_ts: float,
+    *,
+    consumption_only: bool,
+    return_only: bool,
+    stat_type: str,
+) -> dict[datetime, float]:
+    """Bucket interval reads into top-of-hour totals.
+
+    Filters by direction (consumption vs return) and drops readings
+    older than cutoff_ts (yesterday midnight UTC).
+    """
+    hourly_buckets: dict[datetime, float] = {}
+    skipped_filtered = 0
+    skipped_old = 0
+
+    for read in reads:
+        start_str = str(read.get("startTime", ""))
+        value = float(read.get("value", 0))
+        if not start_str:
+            continue
+
+        if consumption_only and value < 0:
+            skipped_filtered += 1
+            continue
+        if return_only and value >= 0:
+            skipped_filtered += 1
+            continue
+        if return_only:
+            value = abs(value)
+
+        try:
+            dt = datetime.fromisoformat(start_str)
+            dt = dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
+        except ValueError:
+            _LOGGER.debug("Could not parse interval startTime: %s", start_str)
+            continue
+
+        hour_start = dt.replace(minute=0, second=0, microsecond=0)
+        if hour_start.timestamp() < cutoff_ts:
+            skipped_old += 1
+            continue
+
+        hourly_buckets[hour_start] = hourly_buckets.get(hour_start, 0.0) + value
+
+    if skipped_filtered > 0:
+        label = "consumption" if consumption_only else "return"
+        _LOGGER.debug(
+            "Filtered %s interval readings (keeping %s only)",
+            skipped_filtered,
+            label,
+        )
+    if skipped_old > 0:
+        _LOGGER.info(
+            "Interval %s: skipped %s readings older than cutoff",
+            stat_type,
+            skipped_old,
+        )
+
+    return hourly_buckets

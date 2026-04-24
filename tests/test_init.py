@@ -192,9 +192,7 @@ async def test_force_refresh_service_with_specific_entry_id(
     assert mock_stats.called
 
 
-async def test_scheduled_refresh_midnight(
-    hass: HomeAssistant, config_entry
-) -> None:
+async def test_scheduled_refresh_midnight(hass: HomeAssistant, config_entry) -> None:
     """Test _scheduled_refresh triggers full refresh at hour=0 (midnight)."""
     captured_cb = None
 

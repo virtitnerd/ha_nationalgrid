@@ -125,9 +125,7 @@ def _make_api_mock() -> AsyncMock:
     return api
 
 
-async def test_button_setup_creates_entities(
-    hass: HomeAssistant, config_entry
-) -> None:
+async def test_button_setup_creates_entities(hass: HomeAssistant, config_entry) -> None:
     """Test that button setup registers a ForceRefresh button for each meter."""
     from homeassistant.helpers import entity_registry as er
 

@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from py_nationalgrid.exceptions import InvalidAuthError
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
-from datetime import UTC, datetime
-
+from py_nationalgrid.exceptions import InvalidAuthError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.national_grid.const import CONF_SELECTED_ACCOUNTS, DOMAIN
@@ -199,7 +198,7 @@ async def test_scheduled_refresh_midnight(
     """Test _scheduled_refresh triggers full refresh at hour=0 (midnight)."""
     captured_cb = None
 
-    def _capture(hass_arg, callback, **kwargs):
+    def _capture(_hass, callback, **_kw):
         nonlocal captured_cb
         captured_cb = callback
         return lambda: None
@@ -230,7 +229,7 @@ async def test_scheduled_refresh_pending_retry(
     """Test _scheduled_refresh retries full refresh when pending_full_refresh is set."""
     captured_cb = None
 
-    def _capture(hass_arg, callback, **kwargs):
+    def _capture(_hass, callback, **_kw):
         nonlocal captured_cb
         captured_cb = callback
         return lambda: None
@@ -261,10 +260,10 @@ async def test_scheduled_refresh_pending_retry(
 async def test_scheduled_refresh_interval_only(
     hass: HomeAssistant, config_entry
 ) -> None:
-    """Test _scheduled_refresh does interval-only refresh at non-midnight without pending."""
+    """Test _scheduled_refresh does interval-only refresh at non-midnight."""
     captured_cb = None
 
-    def _capture(hass_arg, callback, **kwargs):
+    def _capture(_hass, callback, **_kw):
         nonlocal captured_cb
         captured_cb = callback
         return lambda: None
@@ -293,7 +292,7 @@ async def test_scheduled_refresh_interval_only(
 
 async def test_async_reload_entry(hass: HomeAssistant, config_entry) -> None:
     """Test async_reload_entry calls hass.config_entries.async_reload."""
-    from custom_components.national_grid import async_reload_entry  # noqa: PLC0415
+    from custom_components.national_grid import async_reload_entry
 
     with patch.object(
         hass.config_entries,

@@ -541,10 +541,11 @@ def test_bucket_interval_reads_aggregates_into_hourly() -> None:
     )
     base = datetime.now(tz=UTC) - timedelta(hours=2)
     h0 = base.replace(minute=0, second=0, microsecond=0)
+    fmt = "%Y-%m-%dT%H:%M:%S+00:00"
     reads = [
-        {"startTime": h0.strftime("%Y-%m-%dT%H:%M:%S+00:00"), "value": 0.3},
-        {"startTime": (h0 + timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%S+00:00"), "value": 0.4},
-        {"startTime": (h0 + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%S+00:00"), "value": 0.2},
+        {"startTime": h0.strftime(fmt), "value": 0.3},
+        {"startTime": (h0 + timedelta(minutes=15)).strftime(fmt), "value": 0.4},
+        {"startTime": (h0 + timedelta(minutes=30)).strftime(fmt), "value": 0.2},
     ]
     result = _bucket_interval_reads(
         reads,
@@ -652,7 +653,9 @@ async def test_import_hourly_stats_with_negative_returns_two_series(
     await async_import_all_statistics(hass, coordinator)
 
     stat_ids = [call[0][1]["statistic_id"] for call in mock_add_stats.call_args_list]
-    assert any("electric_hourly_usage" in sid and "return" not in sid for sid in stat_ids)
+    assert any(
+        "electric_hourly_usage" in sid and "return" not in sid for sid in stat_ids
+    )
     assert any("return_hourly_usage" in sid for sid in stat_ids)
 
 
@@ -726,6 +729,6 @@ def test_bucket_interval_reads_mixed_old_and_recent() -> None:
 
 def test_data_module_importable() -> None:
     """Test the data module can be imported (covers the type alias definition)."""
-    from custom_components.national_grid import data  # noqa: PLC0415
+    from custom_components.national_grid import data
 
     assert hasattr(data, "NationalGridConfigEntry")

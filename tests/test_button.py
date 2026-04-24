@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -14,7 +15,6 @@ from custom_components.national_grid.button import (
 )
 from custom_components.national_grid.const import CONF_SELECTED_ACCOUNTS, DOMAIN
 from custom_components.national_grid.coordinator import MeterData
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 
 from .conftest import (
     MOCK_ACCOUNT_ID,
@@ -92,7 +92,7 @@ async def test_button_press_calls_force_refresh() -> None:
 
 
 async def test_button_press_passes_correct_service_point() -> None:
-    """Test that pressing a button for a specific SP passes that SP to the coordinator."""
+    """Test pressing a button passes the correct SP to the coordinator."""
     coordinator = _make_coordinator(_make_meter_data("SP_CUSTOM"))
     button = NationalGridForceRefreshButton(coordinator, "SP_CUSTOM")
     await button.async_press()

@@ -14,7 +14,6 @@ from py_nationalgrid.exceptions import (
     CannotConnectError,
     InvalidAuthError,
     NationalGridError,
-    RetryExhaustedError,
 )
 
 from custom_components.national_grid.const import (
@@ -483,7 +482,7 @@ async def test_async_initialize_allows_first_refresh_when_store_empty(
 async def test_async_force_refresh_meter_fetches_from_50_day_window(
     mock_import, hass: HomeAssistant
 ) -> None:
-    """Test force refresh fetches AMI from today-50d (not epoch) and calls stat import."""
+    """Test force refresh fetches AMI from today-50d and calls stat import."""
     from datetime import date
 
     api = _make_api()
@@ -723,7 +722,7 @@ def test_log_ami_results_no_dates(caplog: pytest.LogCaptureFixture) -> None:
     """Test _log_ami_results when readings exist but have no date field."""
     import logging
 
-    from custom_components.national_grid.coordinator import (  # noqa: PLC0415
+    from custom_components.national_grid.coordinator import (
         NationalGridDataUpdateCoordinator,
     )
 
@@ -738,7 +737,7 @@ def test_log_ami_results_empty(caplog: pytest.LogCaptureFixture) -> None:
     """Test _log_ami_results when ami_data is an empty list."""
     import logging
 
-    from custom_components.national_grid.coordinator import (  # noqa: PLC0415
+    from custom_components.national_grid.coordinator import (
         NationalGridDataUpdateCoordinator,
     )
 
@@ -779,7 +778,7 @@ async def test_interval_reads_skips_gas_meter(hass: HomeAssistant) -> None:
 async def test_interval_reads_log_without_starttime(
     hass: HomeAssistant, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test _fetch_interval_reads logs without time range when reads have no startTime."""
+    """Test _fetch_interval_reads logs when reads have no startTime."""
     import logging
 
     api = _make_api()
@@ -794,9 +793,9 @@ async def test_interval_reads_log_without_starttime(
 
 
 async def test_ami_fetch_skips_meter_with_no_service_point(
-    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+    hass: HomeAssistant,
 ) -> None:
-    """Test _fetch_ami_data skips meters with hasAmiSmartMeter=True but no servicePointNumber."""
+    """Test _fetch_ami_data skips AMI meters that have no servicePointNumber."""
     api = _make_api()
     billing = {
         "billingAccountId": MOCK_ACCOUNT_ID,

@@ -100,7 +100,7 @@ def test_entity_billing_account_none() -> None:
 
 
 def test_entity_device_info_smart_meter_not_ami() -> None:
-    """Test device info model for smart meter that is not AMI (covers elif is_smart branch)."""
+    """Test device info model for a smart meter that is not AMI."""
     meter_data = MeterData(
         account_id="acct1",
         meter={
@@ -120,7 +120,7 @@ def test_entity_device_info_smart_meter_not_ami() -> None:
 
 
 def test_entity_device_info_with_service_address() -> None:
-    """Test device info extracts suggested_area from service address (covers if service_address branch)."""
+    """Test device info extracts suggested_area from service address."""
     meter_data = MeterData(
         account_id="acct1",
         meter={

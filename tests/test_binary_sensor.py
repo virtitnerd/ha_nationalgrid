@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 
 from custom_components.national_grid.binary_sensor import (
     BINARY_SENSOR_DESCRIPTIONS,
-    NationalGridBinarySensor,
     PARALLEL_UPDATES,
+    NationalGridBinarySensor,
     _has_smart_meter,
 )
 from custom_components.national_grid.coordinator import MeterData

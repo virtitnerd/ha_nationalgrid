@@ -1,16 +1,15 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
+  release:
+    types: [published]
 
 permissions:
   contents: write
 
 jobs:
   release:
-    name: Create GitHub Release
+    name: Prepare and publish release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the repository
@@ -20,19 +19,21 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Verify manifest version matches tag
+      - name: Set version in manifest.json
         run: |
-          manifest_version=$(python3 -c "import json; print(json.load(open('custom_components/national_grid/manifest.json'))['version'])")
-          tag_version="${{ steps.version.outputs.version }}"
-          if [ "$manifest_version" != "$tag_version" ]; then
-            echo "ERROR: manifest.json version ($manifest_version) does not match tag ($tag_version)"
-            exit 1
-          fi
-          echo "Version check passed: $manifest_version"
+          sed -i '/version/c\  "version": "${{ steps.version.outputs.version }}"' \
+            ${{ github.workspace }}/custom_components/national_grid/manifest.json
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+      - name: ZIP integration directory
+        run: |
+          cd ${{ github.workspace }}/custom_components/national_grid
+          zip -r national_grid.zip ./
+
+      - name: Upload zip to release
+        uses: svenstaro/upload-release-action@v2
         with:
-          name: "v${{ steps.version.outputs.version }}"
-          generate_release_notes: true
-          make_latest: true
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ github.workspace }}/custom_components/national_grid/national_grid.zip
+          asset_name: national_grid.zip
+          tag: ${{ github.ref }}
+          overwrite: true

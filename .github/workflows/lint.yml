@@ -1,4 +1,4 @@
-name: Lint
+name: "Pre-commit"
 
 on:
   push:
@@ -11,8 +11,8 @@ on:
 permissions: {}
 
 jobs:
-  ruff:
-    name: "Ruff"
+  pre-commit:
+    name: "Ruff lint and format"
     runs-on: "ubuntu-latest"
     steps:
       - name: Checkout the repository

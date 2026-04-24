@@ -20,7 +20,7 @@ from py_nationalgrid.exceptions import (
 
 from .const import _LOGGER, CONF_SELECTED_ACCOUNTS, DOMAIN
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     import logging
 
     from homeassistant.core import HomeAssistant
@@ -525,10 +525,14 @@ class NationalGridDataUpdateCoordinator(
         """
         try:
             if is_first_refresh:
-                date_from = date(1970, 1, 1)
+                # Request 50 days back (5-day buffer beyond the ~45-day accessible
+                # window) instead of from epoch. Starting from epoch generates 450+
+                # empty chunk requests that exceed HA's 60-second setup timeout.
+                date_from = today - timedelta(days=50)
                 _LOGGER.info(
-                    "First refresh: fetching 15-min AMI from epoch to %s for meter %s "
-                    "(accessible window ~45 days; older data truncated gracefully)",
+                    "First refresh: fetching 15-min AMI from %s to %s for meter %s "
+                    "(50-day window covers accessible ~45-day hot-storage boundary)",
+                    date_from,
                     today,
                     sp,
                 )

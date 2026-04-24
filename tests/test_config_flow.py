@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-from aionatgrid.exceptions import (
-    CannotConnectError,
-    InvalidAuthError,
-    NationalGridError,
-)
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from py_nationalgrid.exceptions import (
+    CannotConnectError,
+    InvalidAuthError,
+    NationalGridError,
+)
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.national_grid.const import CONF_SELECTED_ACCOUNTS, DOMAIN
@@ -261,6 +261,111 @@ async def test_reauth_flow(hass: HomeAssistant) -> None:
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
     assert entry.data[CONF_PASSWORD] == "new_password"
+
+
+async def test_reauth_confirm_auth_error(hass: HomeAssistant) -> None:
+    """Test reauth confirm shows auth error when credentials are invalid."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=MOCK_USERNAME,
+        data={
+            CONF_USERNAME: MOCK_USERNAME,
+            CONF_PASSWORD: "old_password",
+            CONF_SELECTED_ACCOUNTS: [MOCK_ACCOUNT_ID],
+        },
+        unique_id="testuser-example-com",
+    )
+    entry.add_to_hass(hass)
+
+    with patch(PATCH_CLIENT) as mock_cls:
+        client = mock_cls.return_value
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get_linked_accounts = AsyncMock(
+            side_effect=InvalidAuthError("Bad creds"),
+        )
+
+        result = await entry.start_reauth_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_USERNAME: MOCK_USERNAME,
+                CONF_PASSWORD: "new_password",
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"]["base"] == "auth"
+
+
+async def test_reauth_confirm_connection_error(hass: HomeAssistant) -> None:
+    """Test reauth confirm shows connection error when API is unreachable."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=MOCK_USERNAME,
+        data={
+            CONF_USERNAME: MOCK_USERNAME,
+            CONF_PASSWORD: "old_password",
+            CONF_SELECTED_ACCOUNTS: [MOCK_ACCOUNT_ID],
+        },
+        unique_id="testuser-example-com",
+    )
+    entry.add_to_hass(hass)
+
+    with patch(PATCH_CLIENT) as mock_cls:
+        client = mock_cls.return_value
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get_linked_accounts = AsyncMock(
+            side_effect=CannotConnectError("Timeout"),
+        )
+
+        result = await entry.start_reauth_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_USERNAME: MOCK_USERNAME,
+                CONF_PASSWORD: "new_password",
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"]["base"] == "connection"
+
+
+async def test_reauth_confirm_unknown_error(hass: HomeAssistant) -> None:
+    """Test reauth confirm shows unknown error for unexpected API errors."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=MOCK_USERNAME,
+        data={
+            CONF_USERNAME: MOCK_USERNAME,
+            CONF_PASSWORD: "old_password",
+            CONF_SELECTED_ACCOUNTS: [MOCK_ACCOUNT_ID],
+        },
+        unique_id="testuser-example-com",
+    )
+    entry.add_to_hass(hass)
+
+    with patch(PATCH_CLIENT) as mock_cls:
+        client = mock_cls.return_value
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get_linked_accounts = AsyncMock(
+            side_effect=NationalGridError("Server error"),
+        )
+
+        result = await entry.start_reauth_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_USERNAME: MOCK_USERNAME,
+                CONF_PASSWORD: "new_password",
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"]["base"] == "unknown"
 
 
 async def test_already_configured(hass: HomeAssistant) -> None:

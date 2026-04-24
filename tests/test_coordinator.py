@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from py_nationalgrid.exceptions import (
+    CannotConnectError,
     InvalidAuthError,
     NationalGridError,
 )
@@ -30,6 +31,7 @@ from .conftest import (
     _mock_ami_usages,
     _mock_billing_account,
     _mock_costs,
+    _mock_interval_reads,
     _mock_usages,
 )
 
@@ -68,6 +70,7 @@ def _make_api() -> AsyncMock:
     api.get_energy_usages = AsyncMock(return_value=_mock_usages())
     api.get_energy_usage_costs = AsyncMock(return_value=_mock_costs())
     api.get_ami_energy_usages_15min = AsyncMock(return_value=_mock_ami_usages())
+    api.get_interval_reads = AsyncMock(return_value=_mock_interval_reads())
     return api
 
 
@@ -167,7 +170,7 @@ async def test_coordinator_logs_unavailable_on_failure(
         await coordinator._async_update_data()
 
     assert "National Grid service unavailable" in caplog.text
-    assert coordinator._last_update_success is False
+    assert coordinator._previous_update_success is False
 
 
 async def test_coordinator_logs_recovery(
@@ -177,13 +180,13 @@ async def test_coordinator_logs_recovery(
     api = _make_api()
     coordinator = _make_coordinator(hass, api)
     # Simulate previous failure
-    coordinator._last_update_success = False
+    coordinator._previous_update_success = False
 
     with caplog.at_level(logging.INFO):
         await coordinator._async_update_data()
 
     assert "National Grid service recovered" in caplog.text
-    assert coordinator._last_update_success is True
+    assert coordinator._previous_update_success is True
 
 
 async def test_coordinator_no_duplicate_unavailable_log(
@@ -476,10 +479,10 @@ async def test_async_initialize_allows_first_refresh_when_store_empty(
     "custom_components.national_grid.statistics.async_import_meter_statistics",
     new_callable=AsyncMock,
 )
-async def test_async_force_refresh_meter_fetches_from_epoch(
+async def test_async_force_refresh_meter_fetches_from_50_day_window(
     mock_import, hass: HomeAssistant
 ) -> None:
-    """Test force refresh fetches AMI from epoch and calls stat import."""
+    """Test force refresh fetches AMI from today-50d and calls stat import."""
     from datetime import date
 
     api = _make_api()
@@ -488,9 +491,12 @@ async def test_async_force_refresh_meter_fetches_from_epoch(
 
     await coordinator.async_force_refresh_meter(MOCK_SERVICE_POINT)
 
-    # get_ami_energy_usages_15min should have been called with date_from=epoch
     call_kwargs = api.get_ami_energy_usages_15min.call_args
-    assert call_kwargs.kwargs["date_from"] == date(1970, 1, 1)
+    date_from = call_kwargs.kwargs["date_from"]
+    # Should be ~50 days ago, not epoch
+    assert date_from > date(2000, 1, 1), "date_from must not be epoch"
+    days_back = (date.today() - date_from).days
+    assert 45 <= days_back <= 55, f"Expected ~50 days back, got {days_back}"
 
     # Statistics import should have been called for this service point
     mock_import.assert_called_once()
@@ -519,3 +525,347 @@ async def test_async_force_refresh_meter_unknown_sp(hass: HomeAssistant) -> None
     call_count_before = api.get_ami_energy_usages_15min.call_count
     await coordinator.async_force_refresh_meter("UNKNOWN_SP")
     assert api.get_ami_energy_usages_15min.call_count == call_count_before
+
+
+# ---------------------------------------------------------------------------
+# async_refresh_interval_only tests
+# ---------------------------------------------------------------------------
+
+
+async def test_async_refresh_interval_only_sets_and_clears_mode(
+    hass: HomeAssistant,
+) -> None:
+    """Test interval-only mode flag is set during refresh and cleared after."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    mode_during_refresh = None
+
+    original_fetch = coordinator._fetch_all_data
+
+    async def _capture_mode() -> object:
+        nonlocal mode_during_refresh
+        mode_during_refresh = coordinator._interval_only_mode
+        return await original_fetch()
+
+    coordinator._fetch_all_data = _capture_mode
+    await coordinator.async_refresh_interval_only()
+
+    assert mode_during_refresh is True
+    assert coordinator._interval_only_mode is False
+
+
+async def test_async_refresh_interval_only_skips_ami_fetch(
+    hass: HomeAssistant,
+) -> None:
+    """Test interval-only refresh does not call get_ami_energy_usages_15min."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator._is_first_refresh = False
+    await coordinator.async_refresh_interval_only()
+
+    api.get_ami_energy_usages_15min.assert_not_called()
+
+
+async def test_async_refresh_interval_only_fetches_interval_reads(
+    hass: HomeAssistant,
+) -> None:
+    """Test interval-only refresh still calls get_interval_reads."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator._is_first_refresh = False
+    await coordinator.async_refresh_interval_only()
+
+    api.get_interval_reads.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# async_refresh_full_with_clear tests
+# ---------------------------------------------------------------------------
+
+
+async def test_async_refresh_full_with_clear_sets_and_clears_mode(
+    hass: HomeAssistant,
+) -> None:
+    """Test midnight refresh flag is set during refresh and cleared after."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    mode_during_refresh = None
+
+    original_fetch = coordinator._fetch_all_data
+
+    async def _capture_mode() -> object:
+        nonlocal mode_during_refresh
+        mode_during_refresh = coordinator._is_midnight_refresh
+        return await original_fetch()
+
+    coordinator._fetch_all_data = _capture_mode
+    await coordinator.async_refresh_full_with_clear()
+
+    assert mode_during_refresh is True
+    assert coordinator._is_midnight_refresh is False
+
+
+async def test_async_refresh_full_with_clear_clears_pending_on_success(
+    hass: HomeAssistant,
+) -> None:
+    """Test pending_full_refresh is cleared after a successful full refresh."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator._pending_full_refresh = True
+
+    await coordinator.async_refresh_full_with_clear()
+
+    assert coordinator._pending_full_refresh is False
+
+
+async def test_async_refresh_full_with_clear_sets_pending_on_failure(
+    hass: HomeAssistant,
+) -> None:
+    """Test pending_full_refresh is set when the full refresh fails."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator._fetch_all_data = AsyncMock(
+        side_effect=NationalGridError("boom"),
+    )
+
+    await coordinator.async_refresh_full_with_clear()
+
+    assert coordinator._pending_full_refresh is True
+
+
+# ---------------------------------------------------------------------------
+# reset_to_first_refresh tests
+# ---------------------------------------------------------------------------
+
+
+@patch("custom_components.national_grid.coordinator.Store")
+async def test_reset_to_first_refresh_sets_flag(
+    mock_store_cls, hass: HomeAssistant
+) -> None:
+    """Test reset_to_first_refresh sets _is_first_refresh back to True."""
+    mock_store = AsyncMock()
+    mock_store.async_load = AsyncMock(return_value={"initial_import_done": True})
+    mock_store.async_save = AsyncMock()
+    mock_store_cls.return_value = mock_store
+
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    await coordinator.async_initialize()
+    assert coordinator._is_first_refresh is False
+
+    coordinator.reset_to_first_refresh()
+    assert coordinator._is_first_refresh is True
+
+
+# ---------------------------------------------------------------------------
+# _seed_from_previous tests
+# ---------------------------------------------------------------------------
+
+
+async def test_seed_from_previous_returns_empty_when_no_data(
+    hass: HomeAssistant,
+) -> None:
+    """Test _seed_from_previous returns empty data when coordinator.data is None."""
+    from custom_components.national_grid.coordinator import NationalGridCoordinatorData
+
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = None
+
+    seeded = coordinator._seed_from_previous()
+    assert isinstance(seeded, NationalGridCoordinatorData)
+    assert seeded.accounts == {}
+    assert seeded.meters == {}
+    assert seeded.usages == {}
+    assert seeded.costs == {}
+    assert seeded.ami_usages == {}
+    assert seeded.interval_reads == {}
+
+
+async def test_seed_from_previous_copies_previous_data(hass: HomeAssistant) -> None:
+    """Test _seed_from_previous copies data from the previous fetch."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = await coordinator._async_update_data()
+
+    seeded = coordinator._seed_from_previous()
+    assert MOCK_ACCOUNT_ID in seeded.accounts
+    assert len(seeded.meters) == 2
+    assert MOCK_ACCOUNT_ID in seeded.usages
+    assert MOCK_ACCOUNT_ID in seeded.costs
+
+
+# ---------------------------------------------------------------------------
+# First refresh date window test
+# ---------------------------------------------------------------------------
+
+
+async def test_incremental_full_refresh_uses_7_day_window(
+    hass: HomeAssistant,
+) -> None:
+    """Test non-first full refresh fetches AMI from today-7d (incremental window)."""
+    from datetime import date
+
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator._is_first_refresh = False
+
+    await coordinator._async_update_data()
+
+    call_kwargs = api.get_ami_energy_usages_15min.call_args
+    date_from = call_kwargs.kwargs["date_from"]
+    days_back = (date.today() - date_from).days
+    assert 6 <= days_back <= 8, f"Expected 7-day incremental window, got {days_back}"
+
+
+def test_log_ami_results_no_dates(caplog: pytest.LogCaptureFixture) -> None:
+    """Test _log_ami_results when readings exist but have no date field."""
+    import logging
+
+    from custom_components.national_grid.coordinator import (
+        NationalGridDataUpdateCoordinator,
+    )
+
+    readings = [{"quantity": 5.0}]  # no "date" key
+    with caplog.at_level(logging.DEBUG):
+        NationalGridDataUpdateCoordinator._log_ami_results(readings, "SP_TEST")
+
+    assert "1 AMI 15-min records for meter SP_TEST" in caplog.text
+
+
+def test_log_ami_results_empty(caplog: pytest.LogCaptureFixture) -> None:
+    """Test _log_ami_results when ami_data is an empty list."""
+    import logging
+
+    from custom_components.national_grid.coordinator import (
+        NationalGridDataUpdateCoordinator,
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        NationalGridDataUpdateCoordinator._log_ami_results([], "SP_TEST")
+
+    assert "No AMI 15-min records returned for meter SP_TEST" in caplog.text
+
+
+async def test_interval_reads_skips_gas_meter(hass: HomeAssistant) -> None:
+    """Test _fetch_interval_reads is skipped for AMI-capable Gas meters."""
+    api = _make_api()
+    gas_billing = {
+        "billingAccountId": MOCK_ACCOUNT_ID,
+        "region": "KEDNY",
+        "premiseNumber": "PREM001",
+        "meter": {
+            "nodes": [
+                {
+                    "servicePointNumber": MOCK_SERVICE_POINT,
+                    "meterNumber": "MTR001",
+                    "meterPointNumber": "MPT001",
+                    "fuelType": "Gas",
+                    "hasAmiSmartMeter": True,
+                }
+            ],
+        },
+    }
+    api.get_billing_account = AsyncMock(return_value=gas_billing)
+    coordinator = _make_coordinator(hass, api)
+    coordinator._is_first_refresh = False
+
+    await coordinator._async_update_data()
+
+    api.get_interval_reads.assert_not_called()
+
+
+async def test_interval_reads_log_without_starttime(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test _fetch_interval_reads logs when reads have no startTime."""
+    import logging
+
+    api = _make_api()
+    api.get_interval_reads = AsyncMock(return_value=[{"value": 0.5}])
+    coordinator = _make_coordinator(hass, api)
+    coordinator._is_first_refresh = False
+
+    with caplog.at_level(logging.DEBUG):
+        await coordinator._async_update_data()
+
+    assert "Fetched 1 interval reads for meter" in caplog.text
+
+
+async def test_ami_fetch_skips_meter_with_no_service_point(
+    hass: HomeAssistant,
+) -> None:
+    """Test _fetch_ami_data skips AMI meters that have no servicePointNumber."""
+    api = _make_api()
+    billing = {
+        "billingAccountId": MOCK_ACCOUNT_ID,
+        "region": "KEDNY",
+        "premiseNumber": "PREM001",
+        "meter": {
+            "nodes": [
+                {
+                    "servicePointNumber": "",
+                    "meterNumber": "MTR001",
+                    "fuelType": "Electric",
+                    "hasAmiSmartMeter": True,
+                }
+            ],
+        },
+    }
+    api.get_billing_account = AsyncMock(return_value=billing)
+    coordinator = _make_coordinator(hass, api)
+    coordinator._is_first_refresh = False
+
+    await coordinator._async_update_data()
+
+    api.get_ami_energy_usages_15min.assert_not_called()
+    api.get_interval_reads.assert_not_called()
+
+
+async def test_interval_reads_empty_response(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test _fetch_interval_reads logs when API returns empty list."""
+    api = _make_api()
+    api.get_interval_reads = AsyncMock(return_value=[])
+    coordinator = _make_coordinator(hass, api)
+    coordinator._is_first_refresh = False
+
+    with caplog.at_level(logging.DEBUG):
+        await coordinator._async_update_data()
+
+    assert "No interval reads returned for meter" in caplog.text
+
+
+async def test_interval_reads_exception_is_logged(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test _fetch_interval_reads logs and swallows known API exceptions."""
+    api = _make_api()
+    api.get_interval_reads = AsyncMock(side_effect=CannotConnectError("timeout"))
+    coordinator = _make_coordinator(hass, api)
+    coordinator._is_first_refresh = False
+
+    with caplog.at_level(logging.DEBUG):
+        await coordinator._async_update_data()
+
+    assert "Could not fetch interval reads for meter" in caplog.text
+
+
+async def test_first_refresh_ami_uses_50_day_window(hass: HomeAssistant) -> None:
+    """Test first refresh fetches AMI from today-50d, not from epoch."""
+    from datetime import date
+
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    assert coordinator._is_first_refresh is True
+
+    await coordinator._async_update_data()
+
+    call_kwargs = api.get_ami_energy_usages_15min.call_args
+    date_from = call_kwargs.kwargs["date_from"]
+    # Should be ~50 days ago, definitely not epoch (1970-01-01)
+    assert date_from > date(2000, 1, 1), "date_from should not be epoch"
+    today = date.today()
+    days_back = (today - date_from).days
+    assert 45 <= days_back <= 55, f"Expected ~50 days back, got {days_back}"

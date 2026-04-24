@@ -16,7 +16,7 @@ from .entity import NationalGridEntity
 
 PARALLEL_UPDATES = 1
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     from collections.abc import Callable
 
     from homeassistant.core import HomeAssistant

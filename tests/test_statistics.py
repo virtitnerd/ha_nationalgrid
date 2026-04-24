@@ -10,6 +10,7 @@ from custom_components.national_grid.coordinator import (
     NationalGridCoordinatorData,
 )
 from custom_components.national_grid.statistics import (
+    _bucket_interval_reads,
     _parse_ami_datetime,
     async_import_all_statistics,
     async_import_meter_statistics,
@@ -344,3 +345,390 @@ async def test_import_meter_statistics_unknown_sp(hass) -> None:
     ) as mock_add:
         await async_import_meter_statistics(hass, coordinator, "SP1")
         assert not mock_add.called
+
+
+# ---------------------------------------------------------------------------
+# Interval stats tests
+# ---------------------------------------------------------------------------
+
+import pytest  # noqa: E402
+
+
+def _recent_starttime(hours_ago: float = 2.0) -> str:
+    """Return an ISO timestamp within yesterday's cutoff window."""
+    dt = datetime.now(tz=UTC) - timedelta(hours=hours_ago)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
+
+@patch("custom_components.national_grid.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid.statistics.get_instance")
+async def test_import_interval_stats_electric(
+    mock_get_instance, mock_add_stats, hass
+) -> None:
+    """Test interval stats are imported when interval_reads are present."""
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
+    mock_get_instance.return_value.async_clear_statistics = MagicMock()
+
+    reads = [
+        {"startTime": _recent_starttime(3), "value": 0.5},
+        {"startTime": _recent_starttime(2), "value": 0.4},
+    ]
+    coordinator = MagicMock()
+    coordinator.data = _make_coordinator_data(
+        ami_usages={"SP1": [{"date": "2025-01-15T10:00:00.000Z", "quantity": 5.0}]},
+        meters={"SP1": _make_meter_data("Electric")},
+    )
+    coordinator.data.interval_reads = {"SP1": reads}
+
+    await async_import_all_statistics(hass, coordinator)
+
+    assert mock_add_stats.called
+    stat_ids = [call[0][1]["statistic_id"] for call in mock_add_stats.call_args_list]
+    assert any("interval_usage" in sid for sid in stat_ids)
+
+
+@patch("custom_components.national_grid.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid.statistics.get_instance")
+async def test_import_interval_stats_with_negative_values(
+    mock_get_instance, mock_add_stats, hass
+) -> None:
+    """Test that negative interval reads produce a separate return stats series."""
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
+    mock_get_instance.return_value.async_clear_statistics = MagicMock()
+
+    reads = [
+        {"startTime": _recent_starttime(3), "value": 0.5},
+        {"startTime": _recent_starttime(2), "value": -0.2},
+    ]
+    coordinator = MagicMock()
+    coordinator.data = _make_coordinator_data(
+        ami_usages={"SP1": [{"date": "2025-01-15T10:00:00.000Z", "quantity": 5.0}]},
+        meters={"SP1": _make_meter_data("Electric")},
+    )
+    coordinator.data.interval_reads = {"SP1": reads}
+
+    await async_import_all_statistics(hass, coordinator)
+
+    stat_ids = [call[0][1]["statistic_id"] for call in mock_add_stats.call_args_list]
+    assert any("interval_return_usage" in sid for sid in stat_ids)
+
+
+@patch("custom_components.national_grid.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid.statistics.get_instance")
+async def test_import_interval_stats_no_data_within_window(
+    mock_get_instance, mock_add_stats, hass
+) -> None:
+    """Test that old interval reads (before cutoff) produce no stats."""
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
+    mock_get_instance.return_value.async_clear_statistics = MagicMock()
+
+    old_time = (datetime.now(tz=UTC) - timedelta(days=10)).strftime(
+        "%Y-%m-%dT%H:%M:%S+00:00"
+    )
+    reads = [{"startTime": old_time, "value": 0.5}]
+    coordinator = MagicMock()
+    coordinator.data = _make_coordinator_data(
+        ami_usages={},
+        meters={"SP1": _make_meter_data("Electric")},
+    )
+    coordinator.data.interval_reads = {"SP1": reads}
+
+    await async_import_all_statistics(hass, coordinator)
+
+    interval_calls = [
+        c
+        for c in mock_add_stats.call_args_list
+        if "interval" in c[0][1]["statistic_id"]
+    ]
+    assert len(interval_calls) == 0
+
+
+# ---------------------------------------------------------------------------
+# _bucket_interval_reads tests
+# ---------------------------------------------------------------------------
+
+
+def test_bucket_interval_reads_consumption_only() -> None:
+    """Test bucketing keeps only positive (consumption) values."""
+    cutoff = (datetime.now(tz=UTC) - timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    reads = [
+        {"startTime": _recent_starttime(3), "value": 0.5},
+        {"startTime": _recent_starttime(2), "value": -0.2},
+    ]
+    result = _bucket_interval_reads(
+        reads,
+        cutoff.timestamp(),
+        consumption_only=True,
+        return_only=False,
+        stat_type="consumption",
+    )
+    assert sum(result.values()) == pytest.approx(0.5)
+
+
+def test_bucket_interval_reads_return_only() -> None:
+    """Test bucketing keeps only negative values, stored as positive."""
+    cutoff = (datetime.now(tz=UTC) - timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    reads = [
+        {"startTime": _recent_starttime(3), "value": 0.5},
+        {"startTime": _recent_starttime(2), "value": -0.2},
+    ]
+    result = _bucket_interval_reads(
+        reads,
+        cutoff.timestamp(),
+        consumption_only=False,
+        return_only=True,
+        stat_type="return",
+    )
+    assert sum(result.values()) == pytest.approx(0.2)
+
+
+def test_bucket_interval_reads_skips_old_reads() -> None:
+    """Test bucketing drops readings older than cutoff."""
+    cutoff = (datetime.now(tz=UTC) - timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    old_time = (datetime.now(tz=UTC) - timedelta(days=10)).strftime(
+        "%Y-%m-%dT%H:%M:%S+00:00"
+    )
+    result = _bucket_interval_reads(
+        [{"startTime": old_time, "value": 1.0}],
+        cutoff.timestamp(),
+        consumption_only=True,
+        return_only=False,
+        stat_type="consumption",
+    )
+    assert result == {}
+
+
+def test_bucket_interval_reads_bad_timestamp() -> None:
+    """Test bucketing skips reads with unparseable startTime."""
+    cutoff = (datetime.now(tz=UTC) - timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    result = _bucket_interval_reads(
+        [{"startTime": "not-a-timestamp", "value": 1.0}],
+        cutoff.timestamp(),
+        consumption_only=True,
+        return_only=False,
+        stat_type="consumption",
+    )
+    assert result == {}
+
+
+def test_bucket_interval_reads_missing_starttime() -> None:
+    """Test bucketing skips reads with no startTime key."""
+    cutoff = (datetime.now(tz=UTC) - timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    result = _bucket_interval_reads(
+        [{"value": 1.0}],
+        cutoff.timestamp(),
+        consumption_only=True,
+        return_only=False,
+        stat_type="consumption",
+    )
+    assert result == {}
+
+
+def test_bucket_interval_reads_aggregates_into_hourly() -> None:
+    """Test that multiple reads in the same hour are summed into one bucket."""
+    cutoff = (datetime.now(tz=UTC) - timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    base = datetime.now(tz=UTC) - timedelta(hours=2)
+    h0 = base.replace(minute=0, second=0, microsecond=0)
+    fmt = "%Y-%m-%dT%H:%M:%S+00:00"
+    reads = [
+        {"startTime": h0.strftime(fmt), "value": 0.3},
+        {"startTime": (h0 + timedelta(minutes=15)).strftime(fmt), "value": 0.4},
+        {"startTime": (h0 + timedelta(minutes=30)).strftime(fmt), "value": 0.2},
+    ]
+    result = _bucket_interval_reads(
+        reads,
+        cutoff.timestamp(),
+        consumption_only=False,
+        return_only=False,
+        stat_type="consumption",
+    )
+    assert len(result) == 1
+    assert sum(result.values()) == pytest.approx(0.9)
+
+
+# ---------------------------------------------------------------------------
+# Midnight refresh tests
+# ---------------------------------------------------------------------------
+
+
+@patch("custom_components.national_grid.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid.statistics.get_instance")
+async def test_midnight_refresh_continues_from_existing_sum(
+    mock_get_instance, mock_add_stats, hass
+) -> None:
+    """Test midnight refresh queries pre-window stats and continues the sum."""
+    existing = {
+        "national_grid:SP1_electric_hourly_usage": [
+            {"sum": 50.0, "start": 1736848800.0}
+        ]
+    }
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(
+        return_value=existing
+    )
+    mock_get_instance.return_value.async_clear_statistics = MagicMock()
+
+    readings = [
+        {"date": "2025-01-15T10:00:00.000Z", "quantity": 5.0},
+        {"date": "2025-01-15T11:00:00.000Z", "quantity": 3.0},
+    ]
+    coordinator = MagicMock()
+    coordinator.data = _make_coordinator_data(
+        ami_usages={"SP1": readings},
+        meters={"SP1": _make_meter_data("Electric")},
+        is_first_refresh=False,
+    )
+    coordinator.data.is_midnight_refresh = True
+    coordinator.data.interval_reads = {}
+
+    await async_import_all_statistics(hass, coordinator)
+
+    assert mock_add_stats.called
+    stats = mock_add_stats.call_args[0][2]
+    assert stats[0]["sum"] == pytest.approx(55.0)
+
+
+@patch("custom_components.national_grid.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid.statistics.get_instance")
+async def test_midnight_refresh_no_existing_stats(
+    mock_get_instance, mock_add_stats, hass
+) -> None:
+    """Test midnight refresh with no pre-window stats starts sum from 0."""
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
+    mock_get_instance.return_value.async_clear_statistics = MagicMock()
+
+    readings = [{"date": "2025-01-15T10:00:00.000Z", "quantity": 7.0}]
+    coordinator = MagicMock()
+    coordinator.data = _make_coordinator_data(
+        ami_usages={"SP1": readings},
+        meters={"SP1": _make_meter_data("Electric")},
+        is_first_refresh=False,
+    )
+    coordinator.data.is_midnight_refresh = True
+    coordinator.data.interval_reads = {}
+
+    await async_import_all_statistics(hass, coordinator)
+
+    assert mock_add_stats.called
+    stats = mock_add_stats.call_args[0][2]
+    assert stats[0]["sum"] == pytest.approx(7.0)
+
+
+# ---------------------------------------------------------------------------
+# Electric return (has_negative) AMI stats
+# ---------------------------------------------------------------------------
+
+
+@patch("custom_components.national_grid.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid.statistics.get_instance")
+async def test_import_hourly_stats_with_negative_returns_two_series(
+    mock_get_instance, mock_add_stats, hass
+) -> None:
+    """Test negative AMI readings produce both consumption and return series."""
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
+    mock_get_instance.return_value.async_clear_statistics = MagicMock()
+
+    readings = [
+        {"date": "2025-01-15T10:00:00.000Z", "quantity": 5.0},
+        {"date": "2025-01-15T11:00:00.000Z", "quantity": -2.0},
+    ]
+    coordinator = MagicMock()
+    coordinator.data = _make_coordinator_data(
+        ami_usages={"SP1": readings},
+        meters={"SP1": _make_meter_data("Electric")},
+    )
+    coordinator.data.interval_reads = {}
+
+    await async_import_all_statistics(hass, coordinator)
+
+    stat_ids = [call[0][1]["statistic_id"] for call in mock_add_stats.call_args_list]
+    assert any(
+        "electric_hourly_usage" in sid and "return" not in sid for sid in stat_ids
+    )
+    assert any("return_hourly_usage" in sid for sid in stat_ids)
+
+
+# ---------------------------------------------------------------------------
+# Midnight refresh — readings with no parseable date
+# ---------------------------------------------------------------------------
+
+
+@patch("custom_components.national_grid.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid.statistics.get_instance")
+async def test_midnight_refresh_readings_with_no_date(
+    mock_get_instance, mock_add_stats, hass
+) -> None:
+    """Test midnight refresh where all readings have no date skips the window query.
+
+    Covers the 'if not date_str: continue' branch inside the midnight refresh
+    earliest-timestamp loop (statistics.py _get_last_sum_and_ts).
+    """
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
+    mock_get_instance.return_value.async_clear_statistics = MagicMock()
+
+    # Readings with no "date" key — earliest_ts will remain None after the loop
+    readings = [{"quantity": 5.0}]
+    coordinator = MagicMock()
+    coordinator.data = _make_coordinator_data(
+        ami_usages={"SP1": readings},
+        meters={"SP1": _make_meter_data("Electric")},
+        is_first_refresh=False,
+    )
+    coordinator.data.is_midnight_refresh = True
+    coordinator.data.interval_reads = {}
+
+    await async_import_all_statistics(hass, coordinator)
+
+    # No parseable dates → no stats to import
+    assert not mock_add_stats.called
+
+
+# ---------------------------------------------------------------------------
+# _bucket_interval_reads — mixed old and recent reads
+# ---------------------------------------------------------------------------
+
+
+def test_bucket_interval_reads_mixed_old_and_recent() -> None:
+    """Test skipped_old log branch fires when some reads are older than cutoff."""
+    cutoff = (datetime.now(tz=UTC) - timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    old_time = (datetime.now(tz=UTC) - timedelta(days=10)).strftime(
+        "%Y-%m-%dT%H:%M:%S+00:00"
+    )
+    recent_time = _recent_starttime(2)
+    result = _bucket_interval_reads(
+        [
+            {"startTime": old_time, "value": 1.0},
+            {"startTime": recent_time, "value": 0.5},
+        ],
+        cutoff.timestamp(),
+        consumption_only=True,
+        return_only=False,
+        stat_type="consumption",
+    )
+    # Only the recent read should appear in buckets
+    assert sum(result.values()) == pytest.approx(0.5)
+
+
+# ---------------------------------------------------------------------------
+# data.py module coverage
+# ---------------------------------------------------------------------------
+
+
+def test_data_module_importable() -> None:
+    """Test the data module can be imported (covers the type alias definition)."""
+    from custom_components.national_grid import data
+
+    assert hasattr(data, "NationalGridConfigEntry")

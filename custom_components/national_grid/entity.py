@@ -10,7 +10,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import ATTRIBUTION, DOMAIN
 from .coordinator import NationalGridDataUpdateCoordinator
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     from py_nationalgrid.models import BillingAccount, Meter
 
 

@@ -10,6 +10,8 @@ from custom_components.national_grid.const import UNIT_CCF, UNIT_KWH
 from custom_components.national_grid.coordinator import MeterData
 from custom_components.national_grid.sensor import (
     PARALLEL_UPDATES,
+    SENSOR_DESCRIPTIONS,
+    NationalGridSensor,
     _get_energy_cost,
     _get_energy_device_class,
     _get_energy_unit,
@@ -108,3 +110,17 @@ def test_electric_device_class() -> None:
     """Test electric meter returns ENERGY device class."""
     meter_data = _make_meter_data("Electric")
     assert _get_energy_device_class(meter_data) == SensorDeviceClass.ENERGY
+
+
+def test_sensor_native_value_none_when_no_meter_data() -> None:
+    """Test native_value returns None when coordinator has no meter data for this SP."""
+    meter_data = _make_meter_data("Electric")
+    coordinator = MagicMock()
+    coordinator.get_meter_data.return_value = meter_data
+
+    sensor = NationalGridSensor(coordinator, "SP1", SENSOR_DESCRIPTIONS[0], meter_data)
+
+    # Simulate meter data becoming unavailable after entity creation
+    coordinator.get_meter_data.return_value = None
+
+    assert sensor.native_value is None

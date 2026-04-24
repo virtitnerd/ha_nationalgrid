@@ -17,7 +17,7 @@ from .const import _LOGGER, DOMAIN
 from .coordinator import NationalGridDataUpdateCoordinator
 from .statistics import async_import_all_statistics
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     from datetime import datetime
 
     from homeassistant.core import HomeAssistant, ServiceCall

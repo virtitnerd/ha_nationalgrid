@@ -44,11 +44,11 @@ try:
         StatisticMeanType,
     )
 
-    HAS_MEAN_TYPE = True
+    HAS_MEAN_TYPE = True  # pragma: no cover
 except ImportError:
     HAS_MEAN_TYPE = False
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     from homeassistant.core import HomeAssistant
 
     from .coordinator import NationalGridDataUpdateCoordinator
@@ -71,7 +71,7 @@ def _build_statistic_metadata(
         "unit_class": unit_class,
     }
     if HAS_MEAN_TYPE:
-        kwargs["mean_type"] = StatisticMeanType.NONE
+        kwargs["mean_type"] = StatisticMeanType.NONE  # pragma: no cover
     return StatisticMetaData(**kwargs)
 
 

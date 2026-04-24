@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 from custom_components.national_grid.binary_sensor import (
+    BINARY_SENSOR_DESCRIPTIONS,
+    NationalGridBinarySensor,
     PARALLEL_UPDATES,
     _has_smart_meter,
 )
@@ -37,3 +41,20 @@ def test_smart_meter_off() -> None:
     """Test smart meter returns False when hasAmiSmartMeter is False."""
     meter_data = _make_meter_data(False)
     assert _has_smart_meter(meter_data) is False
+
+
+def test_binary_sensor_is_on_none_when_no_meter_data() -> None:
+    """Test is_on returns None when coordinator has no meter data for this SP."""
+    coordinator = MagicMock()
+    coordinator.get_meter_data.return_value = None
+    sensor = NationalGridBinarySensor(coordinator, "SP1", BINARY_SENSOR_DESCRIPTIONS[0])
+    assert sensor.is_on is None
+
+
+def test_binary_sensor_is_on_returns_value() -> None:
+    """Test is_on returns the value_fn result when meter data is available."""
+    meter_data = _make_meter_data(True)
+    coordinator = MagicMock()
+    coordinator.get_meter_data.return_value = meter_data
+    sensor = NationalGridBinarySensor(coordinator, "SP1", BINARY_SENSOR_DESCRIPTIONS[0])
+    assert sensor.is_on is True

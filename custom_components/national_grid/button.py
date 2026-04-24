@@ -9,7 +9,7 @@ from homeassistant.const import EntityCategory
 
 from .entity import NationalGridEntity
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
 

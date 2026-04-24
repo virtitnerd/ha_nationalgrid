@@ -97,3 +97,46 @@ def test_entity_billing_account_none() -> None:
     coordinator = _make_coordinator(None)
     entity = NationalGridEntity(coordinator, "SP1")
     assert entity.billing_account is None
+
+
+def test_entity_device_info_smart_meter_not_ami() -> None:
+    """Test device info model for smart meter that is not AMI (covers elif is_smart branch)."""
+    meter_data = MeterData(
+        account_id="acct1",
+        meter={
+            "servicePointNumber": "SP1",
+            "meterNumber": "MTR001",
+            "fuelType": "Electric",
+            "hasAmiSmartMeter": False,
+            "isSmartMeter": True,
+        },
+        billing_account={"billingAccountId": "acct1"},
+    )
+    coordinator = _make_coordinator(meter_data)
+    entity = NationalGridEntity(coordinator, "SP1")
+    device_info = entity._attr_device_info
+    assert "Smart Meter" in device_info["model"]
+    assert "AMI" not in device_info["model"]
+
+
+def test_entity_device_info_with_service_address() -> None:
+    """Test device info extracts suggested_area from service address (covers if service_address branch)."""
+    meter_data = MeterData(
+        account_id="acct1",
+        meter={
+            "servicePointNumber": "SP1",
+            "meterNumber": "MTR001",
+            "fuelType": "Electric",
+            "hasAmiSmartMeter": True,
+        },
+        billing_account={
+            "billingAccountId": "acct1",
+            "serviceAddress": {
+                "serviceAddressCompressed": "123 Main St, Albany, NY 12345",
+            },
+        },
+    )
+    coordinator = _make_coordinator(meter_data)
+    entity = NationalGridEntity(coordinator, "SP1")
+    device_info = entity._attr_device_info
+    assert device_info.get("suggested_area") == "123 Main St"

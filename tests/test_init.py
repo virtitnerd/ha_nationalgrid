@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from aionatgrid.exceptions import InvalidAuthError
+from py_nationalgrid.exceptions import InvalidAuthError
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
+from datetime import UTC, datetime
+
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.national_grid.const import CONF_SELECTED_ACCOUNTS, DOMAIN
@@ -24,8 +26,11 @@ from .conftest import (
     _mock_usages,
 )
 
+PATCH_STATISTICS = "custom_components.national_grid.async_import_all_statistics"
+
 PATCH_CLIENT = "custom_components.national_grid.coordinator.NationalGridClient"
 PATCH_SESSION = "custom_components.national_grid.coordinator.async_create_clientsession"
+PATCH_TRACK_TIME = "custom_components.national_grid.async_track_time_change"
 
 
 @pytest.fixture
@@ -50,7 +55,7 @@ def _make_api_mock() -> AsyncMock:
     api.get_billing_account = AsyncMock(return_value=_mock_billing_account())
     api.get_energy_usages = AsyncMock(return_value=_mock_usages())
     api.get_energy_usage_costs = AsyncMock(return_value=_mock_costs())
-    api.get_ami_energy_usages = AsyncMock(return_value=_mock_ami_usages())
+    api.get_ami_energy_usages_15min = AsyncMock(return_value=_mock_ami_usages())
     api.get_interval_reads = AsyncMock(return_value=_mock_interval_reads())
     return api
 
@@ -111,3 +116,246 @@ async def test_setup_entry_auth_error(hass: HomeAssistant, config_entry) -> None
         await hass.async_block_till_done()
 
     assert config_entry.state is ConfigEntryState.SETUP_ERROR
+
+
+async def test_service_registered_after_setup(
+    hass: HomeAssistant, config_entry
+) -> None:
+    """Test force_full_refresh service is registered after entry setup."""
+    with (
+        patch(PATCH_CLIENT, return_value=_make_api_mock()),
+        patch(PATCH_SESSION),
+        patch(PATCH_STATISTICS, new_callable=AsyncMock),
+    ):
+        await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    from custom_components.national_grid.const import DOMAIN
+
+    assert hass.services.has_service(DOMAIN, "force_full_refresh")
+
+
+async def test_force_refresh_service_triggers_coordinator(
+    hass: HomeAssistant, config_entry
+) -> None:
+    """Test calling force_full_refresh service resets and refreshes the coordinator."""
+    with (
+        patch(PATCH_CLIENT, return_value=_make_api_mock()),
+        patch(PATCH_SESSION),
+        patch(PATCH_STATISTICS, new_callable=AsyncMock) as mock_stats,
+    ):
+        await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+
+        mock_stats.reset_mock()
+
+        from custom_components.national_grid.const import DOMAIN
+
+        coordinator = config_entry.runtime_data
+        assert coordinator is not None
+
+        await hass.services.async_call(
+            DOMAIN,
+            "force_full_refresh",
+            {},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    # Statistics import should have been called again after the service call
+    assert mock_stats.called
+
+
+async def test_force_refresh_service_with_specific_entry_id(
+    hass: HomeAssistant, config_entry
+) -> None:
+    """Test force_full_refresh service with a specific entry_id."""
+    with (
+        patch(PATCH_CLIENT, return_value=_make_api_mock()),
+        patch(PATCH_SESSION),
+        patch(PATCH_STATISTICS, new_callable=AsyncMock) as mock_stats,
+    ):
+        await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+
+        mock_stats.reset_mock()
+
+        from custom_components.national_grid.const import DOMAIN
+
+        await hass.services.async_call(
+            DOMAIN,
+            "force_full_refresh",
+            {"entry_id": config_entry.entry_id},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    assert mock_stats.called
+
+
+async def test_scheduled_refresh_midnight(
+    hass: HomeAssistant, config_entry
+) -> None:
+    """Test _scheduled_refresh triggers full refresh at hour=0 (midnight)."""
+    captured_cb = None
+
+    def _capture(hass_arg, callback, **kwargs):
+        nonlocal captured_cb
+        captured_cb = callback
+        return lambda: None
+
+    with (
+        patch(PATCH_CLIENT, return_value=_make_api_mock()),
+        patch(PATCH_SESSION),
+        patch(PATCH_STATISTICS, new_callable=AsyncMock),
+        patch(PATCH_TRACK_TIME, side_effect=_capture),
+    ):
+        await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert captured_cb is not None
+    coordinator = config_entry.runtime_data
+    coordinator.async_refresh_full_with_clear = AsyncMock()
+    coordinator.async_refresh_interval_only = AsyncMock()
+
+    captured_cb(datetime(2026, 1, 1, 0, 18, 0, tzinfo=UTC))
+    await hass.async_block_till_done()
+
+    coordinator.async_refresh_full_with_clear.assert_called_once()
+
+
+async def test_scheduled_refresh_pending_retry(
+    hass: HomeAssistant, config_entry
+) -> None:
+    """Test _scheduled_refresh retries full refresh when pending_full_refresh is set."""
+    captured_cb = None
+
+    def _capture(hass_arg, callback, **kwargs):
+        nonlocal captured_cb
+        captured_cb = callback
+        return lambda: None
+
+    with (
+        patch(PATCH_CLIENT, return_value=_make_api_mock()),
+        patch(PATCH_SESSION),
+        patch(PATCH_STATISTICS, new_callable=AsyncMock),
+        patch(PATCH_TRACK_TIME, side_effect=_capture),
+    ):
+        await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert captured_cb is not None
+    coordinator = config_entry.runtime_data
+    coordinator.async_refresh_full_with_clear = AsyncMock()
+    coordinator.async_refresh_interval_only = AsyncMock()
+
+    # Simulate a pending full refresh flag
+    coordinator._pending_full_refresh = True
+
+    captured_cb(datetime(2026, 1, 1, 12, 18, 0, tzinfo=UTC))
+    await hass.async_block_till_done()
+
+    coordinator.async_refresh_full_with_clear.assert_called_once()
+
+
+async def test_scheduled_refresh_interval_only(
+    hass: HomeAssistant, config_entry
+) -> None:
+    """Test _scheduled_refresh does interval-only refresh at non-midnight without pending."""
+    captured_cb = None
+
+    def _capture(hass_arg, callback, **kwargs):
+        nonlocal captured_cb
+        captured_cb = callback
+        return lambda: None
+
+    with (
+        patch(PATCH_CLIENT, return_value=_make_api_mock()),
+        patch(PATCH_SESSION),
+        patch(PATCH_STATISTICS, new_callable=AsyncMock),
+        patch(PATCH_TRACK_TIME, side_effect=_capture),
+    ):
+        await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert captured_cb is not None
+    coordinator = config_entry.runtime_data
+    coordinator.async_refresh_full_with_clear = AsyncMock()
+    coordinator.async_refresh_interval_only = AsyncMock()
+
+    coordinator._pending_full_refresh = False
+
+    captured_cb(datetime(2026, 1, 1, 14, 18, 0, tzinfo=UTC))
+    await hass.async_block_till_done()
+
+    coordinator.async_refresh_interval_only.assert_called_once()
+
+
+async def test_async_reload_entry(hass: HomeAssistant, config_entry) -> None:
+    """Test async_reload_entry calls hass.config_entries.async_reload."""
+    from custom_components.national_grid import async_reload_entry  # noqa: PLC0415
+
+    with patch.object(
+        hass.config_entries,
+        "async_reload",
+        new_callable=AsyncMock,
+    ) as mock_reload:
+        await async_reload_entry(hass, config_entry)
+
+    mock_reload.assert_called_once_with(config_entry.entry_id)
+
+
+async def test_force_refresh_service_unknown_entry_id(
+    hass: HomeAssistant, config_entry
+) -> None:
+    """Test force_full_refresh service with an unknown entry_id is a no-op."""
+    with (
+        patch(PATCH_CLIENT, return_value=_make_api_mock()),
+        patch(PATCH_SESSION),
+        patch(PATCH_STATISTICS, new_callable=AsyncMock) as mock_stats,
+    ):
+        await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+
+        mock_stats.reset_mock()
+
+        from custom_components.national_grid.const import DOMAIN
+
+        await hass.services.async_call(
+            DOMAIN,
+            "force_full_refresh",
+            {"entry_id": "nonexistent_entry_id"},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    # Stats should not be called again since entry_id was invalid
+    assert not mock_stats.called
+
+
+async def test_force_refresh_service_no_entries(
+    hass: HomeAssistant, config_entry
+) -> None:
+    """Test force_full_refresh service is a no-op when no entries are found."""
+    with (
+        patch(PATCH_CLIENT, return_value=_make_api_mock()),
+        patch(PATCH_SESSION),
+        patch(PATCH_STATISTICS, new_callable=AsyncMock) as mock_stats,
+    ):
+        await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+
+        mock_stats.reset_mock()
+
+        from custom_components.national_grid.const import DOMAIN
+
+        with patch.object(hass.config_entries, "async_entries", return_value=[]):
+            await hass.services.async_call(
+                DOMAIN,
+                "force_full_refresh",
+                {},
+                blocking=True,
+            )
+            await hass.async_block_till_done()
+
+    assert not mock_stats.called

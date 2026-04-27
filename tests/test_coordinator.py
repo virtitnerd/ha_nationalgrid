@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -31,7 +31,6 @@ from .conftest import (
     _mock_ami_usages,
     _mock_billing_account,
     _mock_costs,
-    _mock_interval_reads,
     _mock_usages,
 )
 
@@ -69,8 +68,8 @@ def _make_api() -> AsyncMock:
     api.get_billing_account = AsyncMock(return_value=_mock_billing_account())
     api.get_energy_usages = AsyncMock(return_value=_mock_usages())
     api.get_energy_usage_costs = AsyncMock(return_value=_mock_costs())
+    api.get_ami_energy_usages = AsyncMock(return_value=_mock_ami_usages())
     api.get_ami_energy_usages_15min = AsyncMock(return_value=_mock_ami_usages())
-    api.get_interval_reads = AsyncMock(return_value=_mock_interval_reads())
     return api
 
 
@@ -280,15 +279,59 @@ async def test_fetch_costs_no_region(hass: HomeAssistant) -> None:
 
 
 async def test_fetch_ami_error_graceful(hass: HomeAssistant) -> None:
-    """Test _fetch_all_data handles 15-min AMI error gracefully."""
+    """Test _fetch_all_data handles AMI error gracefully when both methods fail."""
     api = _make_api()
+    api.get_ami_energy_usages = AsyncMock(side_effect=NationalGridError("ami fail"))
     api.get_ami_energy_usages_15min = AsyncMock(
-        side_effect=NationalGridError("ami fail"),
+        side_effect=NationalGridError("15min also fail"),
     )
     coordinator = _make_coordinator(hass, api)
     data = await coordinator._async_update_data()
     # AMI usages should not contain the service point that failed
     assert MOCK_SERVICE_POINT not in data.ami_usages
+
+
+async def test_fetch_ami_error_incremental_pass2_still_runs(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test bulk AMI failure still provides recent 15-min data via Pass 2."""
+    api = _make_api()
+    api.get_ami_energy_usages = AsyncMock(
+        side_effect=NationalGridError("incremental fail")
+    )
+    coordinator = _make_coordinator(hass, api)
+    coordinator._is_first_refresh = False
+
+    with caplog.at_level(logging.DEBUG):
+        data = await coordinator._async_update_data()
+
+    # Pass 2 (recent 72 h) still ran and provided data
+    assert MOCK_SERVICE_POINT in data.ami_usages
+    # 15-min was called with the recent ~3-day window, not a 50-day fallback
+    call_kwargs = api.get_ami_energy_usages_15min.call_args
+    days_back = (datetime.now(UTC).date() - call_kwargs.kwargs["date_from"]).days
+    assert 2 <= days_back <= 4, f"Expected ~3-day recent window, got {days_back}"
+    assert "Could not fetch bulk AMI for meter" in caplog.text
+
+
+async def test_fetch_ami_falls_back_to_15min_on_primary_failure(
+    hass: HomeAssistant,
+) -> None:
+    """Test first-refresh fallback: 50-day 15-min call made, then Pass 2 runs."""
+    api = _make_api()
+    api.get_ami_energy_usages = AsyncMock(side_effect=NationalGridError("daily fail"))
+    coordinator = _make_coordinator(hass, api)
+    data = await coordinator._async_update_data()
+
+    assert MOCK_SERVICE_POINT in data.ami_usages
+
+    # Two 15-min calls: one 50-day fallback (Pass 1) + one recent 3-day (Pass 2)
+    calls = api.get_ami_energy_usages_15min.call_args_list
+    assert len(calls) >= 2, f"Expected ≥2 calls (fallback + recent), got {len(calls)}"
+    windows = [(datetime.now(UTC).date() - c.kwargs["date_from"]).days for c in calls]
+    assert any(45 <= d <= 55 for d in windows), (
+        f"Expected a ~50-day fallback call, got windows: {windows}"
+    )
 
 
 async def test_get_meter_data_none_when_no_data(hass: HomeAssistant) -> None:
@@ -479,10 +522,10 @@ async def test_async_initialize_allows_first_refresh_when_store_empty(
     "custom_components.national_grid.statistics.async_import_meter_statistics",
     new_callable=AsyncMock,
 )
-async def test_async_force_refresh_meter_fetches_from_50_day_window(
+async def test_async_force_refresh_meter_fetches_from_epoch(
     mock_import, hass: HomeAssistant
 ) -> None:
-    """Test force refresh fetches AMI from today-50d and calls stat import."""
+    """Test force refresh calls primary AMI method with epoch and imports stats."""
     from datetime import date
 
     api = _make_api()
@@ -491,12 +534,9 @@ async def test_async_force_refresh_meter_fetches_from_50_day_window(
 
     await coordinator.async_force_refresh_meter(MOCK_SERVICE_POINT)
 
-    call_kwargs = api.get_ami_energy_usages_15min.call_args
+    call_kwargs = api.get_ami_energy_usages.call_args
     date_from = call_kwargs.kwargs["date_from"]
-    # Should be ~50 days ago, not epoch
-    assert date_from > date(2000, 1, 1), "date_from must not be epoch"
-    days_back = (date.today() - date_from).days
-    assert 45 <= days_back <= 55, f"Expected ~50 days back, got {days_back}"
+    assert date_from == date(1970, 1, 1), f"Expected epoch, got {date_from}"
 
     # Statistics import should have been called for this service point
     mock_import.assert_called_once()
@@ -513,7 +553,7 @@ async def test_async_force_refresh_meter_no_data(hass: HomeAssistant) -> None:
     # Should not raise
     await coordinator.async_force_refresh_meter(MOCK_SERVICE_POINT)
     # API should not have been called a second time
-    api.get_ami_energy_usages_15min.assert_not_called()
+    api.get_ami_energy_usages.assert_not_called()
 
 
 async def test_async_force_refresh_meter_unknown_sp(hass: HomeAssistant) -> None:
@@ -522,9 +562,9 @@ async def test_async_force_refresh_meter_unknown_sp(hass: HomeAssistant) -> None
     coordinator = _make_coordinator(hass, api)
     coordinator.data = await coordinator._async_update_data()
 
-    call_count_before = api.get_ami_energy_usages_15min.call_count
+    call_count_before = api.get_ami_energy_usages.call_count
     await coordinator.async_force_refresh_meter("UNKNOWN_SP")
-    assert api.get_ami_energy_usages_15min.call_count == call_count_before
+    assert api.get_ami_energy_usages.call_count == call_count_before
 
 
 # ---------------------------------------------------------------------------
@@ -557,13 +597,13 @@ async def test_async_refresh_interval_only_sets_and_clears_mode(
 async def test_async_refresh_interval_only_skips_ami_fetch(
     hass: HomeAssistant,
 ) -> None:
-    """Test interval-only refresh does not call get_ami_energy_usages_15min."""
+    """Test interval-only refresh does not call get_ami_energy_usages."""
     api = _make_api()
     coordinator = _make_coordinator(hass, api)
     coordinator._is_first_refresh = False
     await coordinator.async_refresh_interval_only()
 
-    api.get_ami_energy_usages_15min.assert_not_called()
+    api.get_ami_energy_usages.assert_not_called()
 
 
 async def test_async_refresh_interval_only_fetches_interval_reads(
@@ -704,17 +744,15 @@ async def test_incremental_full_refresh_uses_7_day_window(
     hass: HomeAssistant,
 ) -> None:
     """Test non-first full refresh fetches AMI from today-7d (incremental window)."""
-    from datetime import date
-
     api = _make_api()
     coordinator = _make_coordinator(hass, api)
     coordinator._is_first_refresh = False
 
     await coordinator._async_update_data()
 
-    call_kwargs = api.get_ami_energy_usages_15min.call_args
+    call_kwargs = api.get_ami_energy_usages.call_args
     date_from = call_kwargs.kwargs["date_from"]
-    days_back = (date.today() - date_from).days
+    days_back = (datetime.now(UTC).date() - date_from).days
     assert 6 <= days_back <= 8, f"Expected 7-day incremental window, got {days_back}"
 
 
@@ -730,7 +768,7 @@ def test_log_ami_results_no_dates(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.DEBUG):
         NationalGridDataUpdateCoordinator._log_ami_results(readings, "SP_TEST")
 
-    assert "1 AMI 15-min records for meter SP_TEST" in caplog.text
+    assert "1 AMI records for meter SP_TEST" in caplog.text
 
 
 def test_log_ami_results_empty(caplog: pytest.LogCaptureFixture) -> None:
@@ -744,7 +782,7 @@ def test_log_ami_results_empty(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.DEBUG):
         NationalGridDataUpdateCoordinator._log_ami_results([], "SP_TEST")
 
-    assert "No AMI 15-min records returned for meter SP_TEST" in caplog.text
+    assert "No AMI records returned for meter SP_TEST" in caplog.text
 
 
 async def test_interval_reads_skips_gas_meter(hass: HomeAssistant) -> None:
@@ -818,7 +856,7 @@ async def test_ami_fetch_skips_meter_with_no_service_point(
 
     await coordinator._async_update_data()
 
-    api.get_ami_energy_usages_15min.assert_not_called()
+    api.get_ami_energy_usages.assert_not_called()
     api.get_interval_reads.assert_not_called()
 
 
@@ -852,8 +890,8 @@ async def test_interval_reads_exception_is_logged(
     assert "Could not fetch interval reads for meter" in caplog.text
 
 
-async def test_first_refresh_ami_uses_50_day_window(hass: HomeAssistant) -> None:
-    """Test first refresh fetches AMI from today-50d, not from epoch."""
+async def test_first_refresh_ami_uses_epoch(hass: HomeAssistant) -> None:
+    """Test first refresh calls primary AMI method with epoch as date_from."""
     from datetime import date
 
     api = _make_api()
@@ -862,10 +900,6 @@ async def test_first_refresh_ami_uses_50_day_window(hass: HomeAssistant) -> None
 
     await coordinator._async_update_data()
 
-    call_kwargs = api.get_ami_energy_usages_15min.call_args
+    call_kwargs = api.get_ami_energy_usages.call_args
     date_from = call_kwargs.kwargs["date_from"]
-    # Should be ~50 days ago, definitely not epoch (1970-01-01)
-    assert date_from > date(2000, 1, 1), "date_from should not be epoch"
-    today = date.today()
-    days_back = (today - date_from).days
-    assert 45 <= days_back <= 55, f"Expected ~50 days back, got {days_back}"
+    assert date_from == date(1970, 1, 1), f"Expected epoch, got {date_from}"

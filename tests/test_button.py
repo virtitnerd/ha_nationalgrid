@@ -35,6 +35,7 @@ PATCH_SESSION = "custom_components.national_grid.coordinator.async_create_client
 def _make_meter_data(
     service_point: str = MOCK_SERVICE_POINT,
     fuel_type: str = "Electric",
+    *,
     has_ami: bool = True,
 ) -> MeterData:
     """Create a MeterData for tests."""
@@ -120,6 +121,7 @@ def _make_api_mock() -> AsyncMock:
     api.get_billing_account = AsyncMock(return_value=_mock_billing_account())
     api.get_energy_usages = AsyncMock(return_value=_mock_usages())
     api.get_energy_usage_costs = AsyncMock(return_value=_mock_costs())
+    api.get_ami_energy_usages = AsyncMock(return_value=_mock_ami_usages())
     api.get_ami_energy_usages_15min = AsyncMock(return_value=_mock_ami_usages())
     api.get_interval_reads = AsyncMock(return_value=_mock_interval_reads())
     return api

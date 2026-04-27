@@ -20,7 +20,7 @@ from py_nationalgrid.exceptions import (
 
 from .const import _LOGGER, CONF_SELECTED_ACCOUNTS, DOMAIN
 
-if TYPE_CHECKING:  # pragma: no cover
+if TYPE_CHECKING:
     import logging
 
     from homeassistant.core import HomeAssistant
@@ -188,9 +188,7 @@ class NationalGridDataUpdateCoordinator(
         data.is_midnight_refresh = self._is_midnight_refresh
 
         if self._is_first_refresh:
-            _LOGGER.info(
-                "First refresh - will import full historical data (from epoch)"
-            )
+            _LOGGER.info("First refresh - fetching AMI from epoch via primary endpoint")
 
         if self._is_midnight_refresh:
             _LOGGER.info("Midnight refresh - will force full hourly import")
@@ -423,10 +421,10 @@ class NationalGridDataUpdateCoordinator(
             if not sp:
                 continue
 
-            # Skip slow GraphQL AMI fetch in interval-only mode
+            # Skip AMI fetch in interval-only mode
             # (AMI data only updates once daily around midnight)
             if not self._interval_only_mode:
-                await self._fetch_ami_15min_data(
+                await self._fetch_ami_graphql_data(
                     meter,
                     premise_number,
                     sp,
@@ -501,7 +499,7 @@ class NationalGridDataUpdateCoordinator(
         ) as err:
             _LOGGER.debug("Could not fetch interval reads for meter %s: %s", sp, err)
 
-    async def _fetch_ami_15min_data(  # noqa: PLR0913
+    async def _fetch_ami_graphql_data(  # noqa: PLR0913
         self,
         meter: Meter,
         premise_number: str,
@@ -511,61 +509,113 @@ class NationalGridDataUpdateCoordinator(
         *,
         is_first_refresh: bool = False,
     ) -> None:
-        """Fetch AMI 15-minute interval data for a single meter.
+        """Fetch AMI data for a single meter using a two-pass strategy.
 
-        Uses get_ami_energy_usages_15min(), which:
-        - Auto-chunks large date ranges into ≤45-day windows
-        - Falls back to the daily endpoint for meters that don't support 15-min
-        - Gracefully truncates on 504 (cold-storage boundary ~45 days ago)
-        - Works for both ELECTRIC and GAS meters
+        Pass 1 — bulk history via get_ami_energy_usages() (daily/hourly endpoint):
+          First refresh: epoch → today-3d
+          Incremental:   today-7d → today-3d
+          Falls back to 50-day get_ami_energy_usages_15min() if the primary fails
+          entirely on first refresh.
 
-        On first refresh, requests from epoch so the library can collect as much
-        history as the API allows (~45 days). Incremental refreshes cover 7 days
-        to catch backfilled data.
+        Pass 2 — recent 72 h via get_ami_energy_usages_15min():
+          Always fetches today-3d → today at 15-min granularity so the most
+          recent data is at full resolution. Errors are logged and skipped.
+
+        Both result lists are concatenated so statistics.py sees the complete
+        range; it buckets to top-of-hour regardless of source granularity.
         """
-        try:
-            if is_first_refresh:
-                # Request 50 days back (5-day buffer beyond the ~45-day accessible
-                # window) instead of from epoch. Starting from epoch generates 450+
-                # empty chunk requests that exceed HA's 60-second setup timeout.
-                date_from = today - timedelta(days=50)
-                _LOGGER.info(
-                    "First refresh: fetching 15-min AMI from %s to %s for meter %s "
-                    "(50-day window covers accessible ~45-day hot-storage boundary)",
-                    date_from,
-                    today,
-                    sp,
-                )
-            else:
-                date_from = today - timedelta(days=7)
-                _LOGGER.debug(
-                    "Incremental: fetching 15-min AMI from %s to %s for meter %s",
-                    date_from,
-                    today,
-                    sp,
-                )
+        meter_kwargs = {
+            "meter_number": str(meter.get("meterNumber", "")),
+            "premise_number": premise_number,
+            "service_point_number": sp,
+            "meter_point_number": str(meter.get("meterPointNumber", "")),
+            "fuel_type": meter.get("fuelType"),
+        }
 
-            ami_data = await self.api.get_ami_energy_usages_15min(
-                meter_number=str(meter.get("meterNumber", "")),
-                premise_number=premise_number,
-                service_point_number=sp,
-                meter_point_number=str(meter.get("meterPointNumber", "")),
-                date_from=date_from,
-                date_to=today,
-                fuel_type=meter.get("fuelType"),  # library normalises case internally
+        cutoff = today - timedelta(days=3)  # 72-hour boundary
+
+        if is_first_refresh:
+            date_from = date(1970, 1, 1)
+            _LOGGER.info(
+                "First refresh: fetching AMI epoch→%s (hourly) + %s→%s (15-min)"
+                " for meter %s",
+                cutoff,
+                cutoff,
+                today,
+                sp,
             )
-            ami_usages[sp] = ami_data
-            self._log_ami_results(ami_data, sp)
+        else:
+            date_from = today - timedelta(days=7)
+            _LOGGER.debug(
+                "Incremental: fetching AMI %s→%s (hourly) + %s→%s (15-min)"
+                " for meter %s",
+                date_from,
+                cutoff,
+                cutoff,
+                today,
+                sp,
+            )
+
+        # Pass 1: bulk history (hourly records)
+        bulk_data: list[AmiEnergyUsage] = []
+        try:
+            bulk_data = await self.api.get_ami_energy_usages(
+                date_from=date_from,
+                date_to=cutoff,
+                **meter_kwargs,
+            )
         except (
             CannotConnectError,
             RetryExhaustedError,
             NationalGridError,
         ) as err:
-            _LOGGER.debug(
-                "Could not fetch 15-min AMI for meter %s: %s",
-                sp,
-                err,
+            if is_first_refresh:
+                # Primary method failed; retry with explicit 15-min, 50-day window.
+                _LOGGER.warning(
+                    "Primary AMI fetch failed for meter %s: %s"
+                    " — retrying with 15-min, 50-day window",
+                    sp,
+                    err,
+                )
+                try:
+                    bulk_data = await self.api.get_ami_energy_usages_15min(
+                        date_from=today - timedelta(days=50),
+                        date_to=cutoff,
+                        **meter_kwargs,
+                    )
+                except (
+                    CannotConnectError,
+                    RetryExhaustedError,
+                    NationalGridError,
+                ) as err2:
+                    _LOGGER.debug(
+                        "Could not fetch bulk AMI for meter %s"
+                        " (both methods failed): %s",
+                        sp,
+                        err2,
+                    )
+            else:
+                _LOGGER.debug("Could not fetch bulk AMI for meter %s: %s", sp, err)
+
+        # Pass 2: recent 72 h at 15-min resolution
+        recent_data: list[AmiEnergyUsage] = []
+        try:
+            recent_data = await self.api.get_ami_energy_usages_15min(
+                date_from=cutoff,
+                date_to=today,
+                **meter_kwargs,
             )
+        except (
+            CannotConnectError,
+            RetryExhaustedError,
+            NationalGridError,
+        ) as err:
+            _LOGGER.debug("Could not fetch recent 15-min AMI for meter %s: %s", sp, err)
+
+        combined = bulk_data + recent_data
+        if combined:
+            ami_usages[sp] = combined
+            self._log_ami_results(combined, sp)
 
     @staticmethod
     def _log_ami_results(ami_data: list[AmiEnergyUsage], sp: str) -> None:
@@ -574,7 +624,7 @@ class NationalGridDataUpdateCoordinator(
             dates = [r.get("date") for r in ami_data if r.get("date")]
             if dates:
                 _LOGGER.info(
-                    "Fetched %s AMI 15-min records for meter %s (date range: %s to %s)",
+                    "Fetched %s AMI records for meter %s (date range: %s to %s)",
                     len(ami_data),
                     sp,
                     min(dates),
@@ -582,13 +632,13 @@ class NationalGridDataUpdateCoordinator(
                 )
             else:
                 _LOGGER.debug(
-                    "Fetched %s AMI 15-min records for meter %s",
+                    "Fetched %s AMI records for meter %s",
                     len(ami_data),
                     sp,
                 )
         else:
             _LOGGER.debug(
-                "No AMI 15-min records returned for meter %s",
+                "No AMI records returned for meter %s",
                 sp,
             )
 
@@ -752,13 +802,13 @@ class NationalGridDataUpdateCoordinator(
         premise_number = str(meter_data.billing_account.get("premiseNumber", ""))
 
         _LOGGER.info("Force refresh triggered for meter %s", service_point)
-        await self._fetch_ami_15min_data(
+        await self._fetch_ami_graphql_data(
             meter=meter_data.meter,
             premise_number=premise_number,
             sp=service_point,
             today=today,
             ami_usages=self.data.ami_usages,
-            is_first_refresh=True,  # always fetch from epoch
+            is_first_refresh=True,
         )
 
         # Import stats for just this meter (deferred import avoids circular import

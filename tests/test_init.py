@@ -54,6 +54,7 @@ def _make_api_mock() -> AsyncMock:
     api.get_billing_account = AsyncMock(return_value=_mock_billing_account())
     api.get_energy_usages = AsyncMock(return_value=_mock_usages())
     api.get_energy_usage_costs = AsyncMock(return_value=_mock_costs())
+    api.get_ami_energy_usages = AsyncMock(return_value=_mock_ami_usages())
     api.get_ami_energy_usages_15min = AsyncMock(return_value=_mock_ami_usages())
     api.get_interval_reads = AsyncMock(return_value=_mock_interval_reads())
     return api

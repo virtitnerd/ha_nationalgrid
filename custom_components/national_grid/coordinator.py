@@ -617,7 +617,7 @@ class NationalGridDataUpdateCoordinator(
                 )
                 try:
                     bulk_data = await self.api.get_ami_energy_usages_15min(
-                        date_from=today - timedelta(days=50),
+                        date_from=date_from,
                         date_to=cutoff,
                         **meter_kwargs,  # type: ignore[arg-type]
                     )

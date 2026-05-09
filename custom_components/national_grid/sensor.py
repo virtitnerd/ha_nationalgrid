@@ -184,7 +184,7 @@ ACCOUNT_SENSOR_DESCRIPTIONS: tuple[NationalGridAccountSensorEntityDescription, .
     NationalGridAccountSensorEntityDescription(
         key="current_bill_amount",
         translation_key="current_bill_amount",
-        native_unit_of_measurement="$",
+        native_unit_of_measurement="USD",
         device_class=SensorDeviceClass.MONETARY,
         state_class=None,
         value_fn=_get_current_bill_amount,

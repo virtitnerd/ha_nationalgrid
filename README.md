@@ -101,7 +101,7 @@ These sensors live on the account device and reflect account-level data.
 
 | Entity            | Description                                            | Unit | Device Class | Category   |
 | ----------------- | ------------------------------------------------------ | ---- | ------------ | ---------- |
-| Current Bill      | Current billing period charges                         | $    | Monetary     | —          |
+| Current Bill      | Current billing period charges                         | USD  | Monetary     | —          |
 | Next Reading Date | Next scheduled meter read date for this account        | —    | Date         | Diagnostic |
 
 **Current Bill attributes:**

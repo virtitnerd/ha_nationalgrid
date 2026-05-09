@@ -739,7 +739,7 @@ def test_data_module_importable() -> None:
 async def test_import_ami_stats_with_negative_creates_return_series(
     mock_get_instance, mock_add_stats, hass
 ) -> None:
-    """Test that negative AMI readings produce a separate electric return stat series."""
+    """Test negative AMI readings produce a separate electric return stat series."""
     mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
 
     readings = [
@@ -757,3 +757,22 @@ async def test_import_ami_stats_with_negative_creates_return_series(
     stat_ids = [call[0][1]["statistic_id"] for call in mock_add_stats.call_args_list]
     assert any("electric_return_hourly_usage" in sid for sid in stat_ids)
     assert any("acct1_SP1" in sid for sid in stat_ids)
+
+
+async def test_import_all_statistics_skips_interval_reads_with_unknown_sp(hass) -> None:
+    """Test interval_reads for unknown service points are skipped gracefully."""
+    coordinator = MagicMock()
+    coordinator.data = _make_coordinator_data(
+        ami_usages={},
+        meters={},  # no meters registered
+    )
+    # interval_reads references a SP that has no meter entry
+    coordinator.data.interval_reads = {
+        "SP_UNKNOWN": [{"startTime": "2025-01-15T10:00:00+00:00", "value": 0.5}]
+    }
+
+    with patch(
+        "custom_components.national_grid.statistics.async_add_external_statistics"
+    ) as mock_add:
+        await async_import_all_statistics(hass, coordinator)
+        assert not mock_add.called

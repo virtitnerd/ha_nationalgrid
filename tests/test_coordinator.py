@@ -322,7 +322,9 @@ async def test_fetch_ami_error_incremental_pass2_still_runs(
 async def test_fetch_ami_falls_back_to_15min_on_primary_failure(
     hass: HomeAssistant,
 ) -> None:
-    """Test first-refresh fallback: 50-day 15-min call made, then Pass 2 runs."""
+    """Test first-refresh fallback: epoch-based 15-min call made, then Pass 2 runs."""
+    from datetime import date as date_type
+
     api = _make_api()
     api.get_ami_energy_usages = AsyncMock(side_effect=NationalGridError("daily fail"))
     coordinator = _make_coordinator(hass, api)
@@ -330,12 +332,13 @@ async def test_fetch_ami_falls_back_to_15min_on_primary_failure(
 
     assert MOCK_SERVICE_POINT in data.ami_usages
 
-    # Two 15-min calls: one 50-day fallback (Pass 1) + one recent 3-day (Pass 2)
+    # Two 15-min calls: one epoch-based fallback (Pass 1) + one recent 3-day (Pass 2)
     calls = api.get_ami_energy_usages_15min.call_args_list
     assert len(calls) >= 2, f"Expected ≥2 calls (fallback + recent), got {len(calls)}"
-    windows = [(datetime.now(UTC).date() - c.kwargs["date_from"]).days for c in calls]
-    assert any(45 <= d <= 55 for d in windows), (
-        f"Expected a ~50-day fallback call, got windows: {windows}"
+    # Fallback should use epoch (1970-01-01) as date_from, not a limited window
+    date_froms = [c.kwargs["date_from"] for c in calls]
+    assert any(d == date_type(1970, 1, 1) for d in date_froms), (
+        f"Expected an epoch-based fallback call, got date_froms: {date_froms}"
     )
 
 

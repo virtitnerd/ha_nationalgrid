@@ -18,7 +18,7 @@ This is a fork of [ryanmorash/ha_nationalgrid](https://github.com/ryanmorash/ha_
 - **Smart Meter Detection**: Identifies meters with AMI (Advanced Metering Infrastructure) capabilities
 - **15-Minute AMI Statistics**: Imports granular energy data into Home Assistant's Energy Dashboard
 - **Solar / Return Support**: Separate statistics for grid consumption and energy returned to the grid
-- **Historical Data Import**: On first setup, imports up to ~5 years of available 15-min AMI data
+- **Historical Data Import**: On first setup, imports all available AMI data (as far back as National Grid retains for your meter)
 - **Fast Restarts**: After the initial import, HA restarts skip the historical fetch and load in seconds
 - **Per-Meter Force Refresh**: Button entity on each meter device to re-import its full history on demand
 - **Force Refresh Service**: Manually trigger a full historical data refresh for all meters
@@ -152,7 +152,7 @@ The integration refreshes data at the **18th minute of every hour**.
 
 On first setup, the integration imports full historical data:
 
-- Up to ~5 years of 15-minute AMI data (limited by what the API retains)
+- All available 15-minute AMI data (as far back as National Grid retains for your meter)
 - 15 months of billing usage data
 - Current billing period cost data
 - Bill history
@@ -192,8 +192,8 @@ Statistics IDs include the account ID and service point to ensure uniqueness acr
 
 | Statistic ID                                                          | Description                              | Window   |
 | --------------------------------------------------------------------- | ---------------------------------------- | -------- |
-| `national_grid:{account_id}_{sp}_electric_hourly_usage`               | Consumption — verified AMI data (kWh)    | ~5 years |
-| `national_grid:{account_id}_{sp}_electric_return_hourly_usage`        | Return to grid / solar — verified (kWh)  | ~5 years |
+| `national_grid:{account_id}_{sp}_electric_hourly_usage`               | Consumption — verified AMI data (kWh)    | All available history |
+| `national_grid:{account_id}_{sp}_electric_return_hourly_usage`        | Return to grid / solar — verified (kWh)  | All available history |
 | `national_grid:{account_id}_{sp}_electric_interval_usage`             | Consumption — near real-time (kWh)       | ~2 days  |
 | `national_grid:{account_id}_{sp}_electric_interval_return_usage`      | Return to grid / solar — real-time (kWh) | ~2 days  |
 
@@ -201,18 +201,23 @@ Statistics IDs include the account ID and service point to ensure uniqueness acr
 
 | Statistic ID                                       | Description           | Window   |
 | -------------------------------------------------- | --------------------- | -------- |
-| `national_grid:{account_id}_{sp}_gas_hourly_usage` | Gas consumption (CCF) | ~5 years |
+| `national_grid:{account_id}_{sp}_gas_hourly_usage` | Gas consumption (CCF) | All available history |
 
 > **Note**: `{account_id}` is your billing account number and `{sp}` is your meter's service point number. Both can be found in the device info for your meter in Home Assistant (e.g., `national_grid:1234567890_SP001_electric_hourly_usage`).
 
 ### Energy Dashboard Setup
 
+> **Finding your IDs**: Your `{account_id}` and `{sp}` (service point number) can be found in **Settings > Devices & Services > National Grid**, then click your meter device and look under **Device info**.
+
 1. Go to **Settings > Dashboards > Energy**
-2. Under **Electricity grid**:
-   - Add `national_grid:{account_id}_{sp}_electric_hourly_usage` as **Grid consumption**
-   - If you have solar, add `national_grid:{account_id}_{sp}_electric_return_hourly_usage` as **Return to grid**
-3. Under **Gas consumption**:
-   - Add `national_grid:{account_id}_{sp}_gas_hourly_usage`
+2. Under **Electricity grid**, click **Add consumption** and search for your stat ID — add each one separately:
+   - `national_grid:{account_id}_{sp}_electric_hourly_usage` — verified AMI data (history beyond 2 days)
+   - `national_grid:{account_id}_{sp}_electric_interval_usage` — near real-time data (last ~2 days)
+   - If you have solar/return-to-grid, also add `national_grid:{account_id}_{sp}_electric_return_hourly_usage` under **Return to grid**
+3. Under **Gas consumption**, click **Add gas source** and add:
+   - `national_grid:{account_id}_{sp}_gas_hourly_usage`
+
+> **Why two electricity sources?** National Grid takes 1–2 days to finalize and publish verified AMI readings. The interval stat bridges that gap with near-real-time data. The integration ensures there is no overlap between them — together they give you a complete, continuous picture with no double-counting.
 
 ## Services
 
@@ -245,7 +250,7 @@ If you notice gaps in your statistics:
 
 ### Slow First Startup
 
-The first setup imports up to 5 years of 15-minute data. This is normal and takes 1–2 minutes per meter. All subsequent HA restarts complete in seconds because the initial import state is persisted.
+The first setup imports all available AMI history for each meter — how far back this goes depends on what National Grid retains for your specific meter. This is normal and typically takes 1–2 minutes per meter, but may take longer if the integration falls back to the 15-minute endpoint. All subsequent HA restarts complete in seconds because the initial import state is persisted.
 
 ### Statistics Not Showing in Energy Dashboard
 

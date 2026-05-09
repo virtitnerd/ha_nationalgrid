@@ -69,18 +69,17 @@ def _mock_usages() -> list[dict]:
 
 
 def _mock_costs() -> list[dict]:
-    """Return mock energy costs."""
+    """Return mock energy costs.
+
+    month is 1-12 (not year-aware); date is YYYY-MM-01 and is the correct
+    field to sort by for most-recent detection.  Includes a December→January
+    year boundary so tests can verify date-based ordering is used.
+    """
     return [
-        {
-            "fuelType": "ELECTRIC",
-            "month": 202501,
-            "amount": 120.50,
-        },
-        {
-            "fuelType": "GAS",
-            "month": 202501,
-            "amount": 45.00,
-        },
+        {"fuelType": "ELECTRIC", "month": 12, "date": "2024-12-01", "amount": 105.00},
+        {"fuelType": "GAS", "month": 12, "date": "2024-12-01", "amount": 38.00},
+        {"fuelType": "ELECTRIC", "month": 1, "date": "2025-01-01", "amount": 120.50},
+        {"fuelType": "GAS", "month": 1, "date": "2025-01-01", "amount": 45.00},
     ]
 
 

@@ -757,8 +757,8 @@ class NationalGridDataUpdateCoordinator(
         if not filtered:
             return None
 
-        # Return most recent (highest month).
-        return max(filtered, key=lambda c: c.get("month", 0))
+        # Return most recent by date (month is 1-12 only, not year-aware).
+        return max(filtered, key=lambda c: c.get("date", ""))
 
     def get_all_usages(
         self, account_id: str, fuel_type: str | None = None

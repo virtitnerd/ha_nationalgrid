@@ -395,6 +395,27 @@ async def test_get_latest_cost_filtered_empty(hass: HomeAssistant) -> None:
     assert coordinator.get_latest_cost(MOCK_ACCOUNT_ID, fuel_type="Solar") is None
 
 
+async def test_get_latest_cost_uses_date_not_month_number(hass: HomeAssistant) -> None:
+    """Test get_latest_cost sorts by date, not the month field.
+
+    Regression: month is 1-12 only (not year-aware). December (month=12) must
+    not be returned over a more recent January (month=1) from the next year.
+    """
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = await coordinator._async_update_data()
+
+    cost = coordinator.get_latest_cost(MOCK_ACCOUNT_ID, fuel_type="Electric")
+    assert cost is not None
+    assert cost["date"] == "2025-01-01"
+    assert cost["amount"] == 120.50
+
+    cost = coordinator.get_latest_cost(MOCK_ACCOUNT_ID, fuel_type="Gas")
+    assert cost is not None
+    assert cost["date"] == "2025-01-01"
+    assert cost["amount"] == 45.00
+
+
 async def test_get_all_usages_none_data(hass: HomeAssistant) -> None:
     """Test get_all_usages returns empty when data is None."""
     api = _make_api()

@@ -45,8 +45,8 @@ try:
     )
 
     HAS_MEAN_TYPE = True  # pragma: no cover
-except ImportError:
-    HAS_MEAN_TYPE = False
+except ImportError:  # pragma: no cover
+    HAS_MEAN_TYPE = False  # pragma: no cover
 
 if TYPE_CHECKING:  # pragma: no cover
     from homeassistant.core import HomeAssistant

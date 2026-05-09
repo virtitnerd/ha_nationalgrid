@@ -28,8 +28,10 @@ from custom_components.national_grid.coordinator import (
 from .conftest import (
     MOCK_ACCOUNT_ID,
     MOCK_SERVICE_POINT,
+    _mock_account_links,
     _mock_ami_usages,
     _mock_billing_account,
+    _mock_bills,
     _mock_costs,
     _mock_usages,
 )
@@ -70,6 +72,9 @@ def _make_api() -> AsyncMock:
     api.get_energy_usage_costs = AsyncMock(return_value=_mock_costs())
     api.get_ami_energy_usages = AsyncMock(return_value=_mock_ami_usages())
     api.get_ami_energy_usages_15min = AsyncMock(return_value=_mock_ami_usages())
+    api.get_linked_accounts = AsyncMock(return_value=_mock_account_links())
+    api.get_interval_reads = AsyncMock(return_value=[])
+    api.get_bills = AsyncMock(return_value=_mock_bills())
     return api
 
 
@@ -390,6 +395,27 @@ async def test_get_latest_cost_filtered_empty(hass: HomeAssistant) -> None:
     assert coordinator.get_latest_cost(MOCK_ACCOUNT_ID, fuel_type="Solar") is None
 
 
+async def test_get_latest_cost_uses_date_not_month_number(hass: HomeAssistant) -> None:
+    """Test get_latest_cost sorts by date, not the month field.
+
+    Regression: month is 1-12 only (not year-aware). December (month=12) must
+    not be returned over a more recent January (month=1) from the next year.
+    """
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = await coordinator._async_update_data()
+
+    cost = coordinator.get_latest_cost(MOCK_ACCOUNT_ID, fuel_type="Electric")
+    assert cost is not None
+    assert cost["date"] == "2025-01-01"
+    assert cost["amount"] == 120.50
+
+    cost = coordinator.get_latest_cost(MOCK_ACCOUNT_ID, fuel_type="Gas")
+    assert cost is not None
+    assert cost["date"] == "2025-01-01"
+    assert cost["amount"] == 45.00
+
+
 async def test_get_all_usages_none_data(hass: HomeAssistant) -> None:
     """Test get_all_usages returns empty when data is None."""
     api = _make_api()
@@ -454,6 +480,22 @@ async def test_get_latest_ami_usage_no_readings(hass: HomeAssistant) -> None:
     coordinator = _make_coordinator(hass, api)
     coordinator.data = await coordinator._async_update_data()
     assert coordinator.get_latest_ami_usage("NONEXISTENT_SP") is None
+
+
+async def test_get_current_bill_none_when_no_data(hass: HomeAssistant) -> None:
+    """Test get_current_bill returns None when data is None."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = None
+    assert coordinator.get_current_bill("acct1") is None
+
+
+async def test_get_next_reading_date_none_when_no_data(hass: HomeAssistant) -> None:
+    """Test get_next_reading_date returns None when data is None."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = None
+    assert coordinator.get_next_reading_date("acct1") is None
 
 
 # ---------------------------------------------------------------------------
@@ -903,3 +945,134 @@ async def test_first_refresh_ami_uses_epoch(hass: HomeAssistant) -> None:
     call_kwargs = api.get_ami_energy_usages.call_args
     date_from = call_kwargs.kwargs["date_from"]
     assert date_from == date(1970, 1, 1), f"Expected epoch, got {date_from}"
+
+
+async def test_coordinator_reading_dates_populated(hass: HomeAssistant) -> None:
+    """Test reading_dates is populated from get_linked_accounts."""
+    api = _make_api()
+    api.get_linked_accounts = AsyncMock(
+        return_value=_mock_account_links(
+            account_id=MOCK_ACCOUNT_ID, next_reading_date="2025-06-01"
+        )
+    )
+    coordinator = _make_coordinator(hass, api)
+
+    coordinator.data = await coordinator._async_update_data()
+
+    assert coordinator.data.reading_dates.get(MOCK_ACCOUNT_ID) == "2025-06-01"
+    assert coordinator.get_next_reading_date(MOCK_ACCOUNT_ID) == "2025-06-01"
+
+
+async def test_coordinator_reading_dates_none_value(hass: HomeAssistant) -> None:
+    """Test reading_dates stores None when nextSchedReadingDate is absent."""
+    api = _make_api()
+    api.get_linked_accounts = AsyncMock(
+        return_value=_mock_account_links(
+            account_id=MOCK_ACCOUNT_ID, next_reading_date=None
+        )
+    )
+    coordinator = _make_coordinator(hass, api)
+
+    coordinator.data = await coordinator._async_update_data()
+
+    assert coordinator.data.reading_dates.get(MOCK_ACCOUNT_ID) is None
+    assert coordinator.get_next_reading_date(MOCK_ACCOUNT_ID) is None
+
+
+async def test_coordinator_reading_dates_api_error_skipped(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test get_linked_accounts error is logged at DEBUG and not re-raised."""
+    api = _make_api()
+    api.get_linked_accounts = AsyncMock(side_effect=CannotConnectError("timeout"))
+    coordinator = _make_coordinator(hass, api)
+
+    with caplog.at_level(logging.DEBUG):
+        coordinator.data = await coordinator._async_update_data()
+
+    assert "Could not fetch next reading dates" in caplog.text
+    assert coordinator.data.reading_dates == {}
+
+
+async def test_seed_from_previous_preserves_reading_dates(
+    hass: HomeAssistant,
+) -> None:
+    """Test reading_dates is preserved across incremental refreshes when API errors."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+
+    coordinator.data = await coordinator._async_update_data()
+    assert MOCK_ACCOUNT_ID in coordinator.data.reading_dates
+
+    api.get_linked_accounts = AsyncMock(side_effect=CannotConnectError("timeout"))
+    coordinator._is_first_refresh = False
+    data2 = await coordinator._async_update_data()
+
+    assert MOCK_ACCOUNT_ID in data2.reading_dates
+
+
+async def test_coordinator_bills_populated(hass: HomeAssistant) -> None:
+    """Test bills are fetched and stored keyed by account_id."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+
+    coordinator.data = await coordinator._async_update_data()
+
+    bills = coordinator.data.bills.get(MOCK_ACCOUNT_ID, [])
+    assert len(bills) == 2
+    assert bills[0]["currentChargesAmount"] == 145.50
+    assert bills[0]["dueDate"] == "2025-01-22"
+
+
+async def test_coordinator_get_current_bill(hass: HomeAssistant) -> None:
+    """Test get_current_bill returns the most recent (first) bill."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+
+    coordinator.data = await coordinator._async_update_data()
+    bill = coordinator.get_current_bill(MOCK_ACCOUNT_ID)
+
+    assert bill is not None
+    assert bill["currentChargesAmount"] == 145.50
+    assert bill["status"] == "UNPAID"
+
+
+async def test_coordinator_get_current_bill_no_bills(hass: HomeAssistant) -> None:
+    """Test get_current_bill returns None when no bills available."""
+    api = _make_api()
+    api.get_bills = AsyncMock(return_value=[])
+    coordinator = _make_coordinator(hass, api)
+
+    coordinator.data = await coordinator._async_update_data()
+
+    assert coordinator.get_current_bill(MOCK_ACCOUNT_ID) is None
+
+
+async def test_coordinator_bills_error_skipped(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test bill fetch errors are logged at DEBUG and not re-raised."""
+    api = _make_api()
+    api.get_bills = AsyncMock(side_effect=CannotConnectError("timeout"))
+    coordinator = _make_coordinator(hass, api)
+
+    with caplog.at_level(logging.DEBUG):
+        coordinator.data = await coordinator._async_update_data()
+
+    assert "Could not fetch bills" in caplog.text
+    assert coordinator.data.bills.get(MOCK_ACCOUNT_ID, []) == []
+
+
+async def test_seed_from_previous_preserves_bills(hass: HomeAssistant) -> None:
+    """Test bills are preserved across incremental refreshes when API errors."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+
+    coordinator.data = await coordinator._async_update_data()
+    assert MOCK_ACCOUNT_ID in coordinator.data.bills
+
+    api.get_bills = AsyncMock(side_effect=CannotConnectError("timeout"))
+    coordinator._is_first_refresh = False
+    data2 = await coordinator._async_update_data()
+
+    assert MOCK_ACCOUNT_ID in data2.bills

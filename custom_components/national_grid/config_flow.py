@@ -59,19 +59,6 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(slugify(self._username))
                 self._abort_if_unique_id_configured()
 
-                if len(self._accounts) == 1:
-                    # Single account - skip selection and auto-select.
-                    return self.async_create_entry(
-                        title=self._username,
-                        data={
-                            CONF_USERNAME: self._username,
-                            CONF_PASSWORD: self._password,
-                            CONF_SELECTED_ACCOUNTS: [
-                                self._accounts[0]["billingAccountId"]
-                            ],
-                        },
-                    )
-                # Multiple accounts - proceed to selection step.
                 return await self.async_step_select_accounts()
 
         return self.async_show_form(
@@ -111,7 +98,7 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 )
 
             return self.async_create_entry(
-                title=self._username,
+                title=self._username or "",
                 data={
                     CONF_USERNAME: self._username,
                     CONF_PASSWORD: self._password,
@@ -122,6 +109,54 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="select_accounts",
             data_schema=self._get_account_selection_schema(),
+            errors={},
+        )
+
+    async def async_step_reconfigure(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Handle reconfiguration — let the user update their account selection."""
+        reconfigure_entry = self._get_reconfigure_entry()
+        _errors: dict[str, str] = {}
+
+        if not self._accounts:
+            try:
+                self._accounts = await self._fetch_accounts(
+                    username=reconfigure_entry.data[CONF_USERNAME],
+                    password=reconfigure_entry.data[CONF_PASSWORD],
+                )
+            except InvalidAuthError as exception:
+                _LOGGER.warning(exception)
+                _errors["base"] = "auth"
+            except CannotConnectError as exception:
+                _LOGGER.error(exception)
+                _errors["base"] = "connection"
+            except NationalGridError as exception:
+                _LOGGER.exception(exception)
+                _errors["base"] = "unknown"
+
+        current_selection = reconfigure_entry.data.get(CONF_SELECTED_ACCOUNTS, [])
+
+        if not _errors and user_input is not None:
+            selected = user_input.get(CONF_SELECTED_ACCOUNTS, [])
+            if not selected:
+                _errors["base"] = "no_accounts_selected"
+            else:
+                return self.async_update_reload_and_abort(
+                    reconfigure_entry,
+                    data={**reconfigure_entry.data, CONF_SELECTED_ACCOUNTS: selected},
+                )
+
+        schema = (
+            self._get_account_selection_schema(current_selection=current_selection)
+            if self._accounts
+            else vol.Schema({})
+        )
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=schema,
+            errors=_errors,
         )
 
     async def async_step_reauth(
@@ -189,8 +224,10 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             errors=_errors,
         )
 
-    def _get_account_selection_schema(self) -> vol.Schema:
-        """Get the schema for account selection."""
+    def _get_account_selection_schema(
+        self, current_selection: list[str] | None = None
+    ) -> vol.Schema:
+        """Get the schema for account selection, optionally pre-filling a selection."""
         account_options = [
             selector.SelectOptionDict(
                 value=account["billingAccountId"],
@@ -199,9 +236,15 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             for account in self._accounts
         ]
 
+        field = (
+            vol.Required(CONF_SELECTED_ACCOUNTS, default=current_selection)
+            if current_selection
+            else vol.Required(CONF_SELECTED_ACCOUNTS)
+        )
+
         return vol.Schema(
             {
-                vol.Required(CONF_SELECTED_ACCOUNTS): selector.SelectSelector(
+                field: selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=account_options,
                         multiple=True,
@@ -223,4 +266,4 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         async with client:
             accounts = await client.get_linked_accounts()
             # Convert to plain dicts for storage.
-            return [dict(account) for account in accounts]
+            return [dict(account.items()) for account in accounts]  # type: ignore[arg-type]

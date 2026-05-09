@@ -1,0 +1,79 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "description": "Insira as credenciais da sua conta National Grid.",
+                "data": {
+                    "username": "Nome de usuário",
+                    "password": "Senha"
+                }
+            },
+            "select_accounts": {
+                "description": "Selecione quais contas de cobrança monitorar.",
+                "data": {
+                    "selected_accounts": "Contas de cobrança"
+                }
+            },
+            "reauth_confirm": {
+                "description": "Por favor, insira novamente suas credenciais da National Grid.",
+                "data": {
+                    "username": "Nome de usuário",
+                    "password": "Senha"
+                }
+            },
+            "reconfigure": {
+                "description": "Atualize quais contas da National Grid monitorar.",
+                "data": {
+                    "selected_accounts": "Contas de cobrança"
+                }
+            }
+        },
+        "error": {
+            "auth": "Nome de usuário ou senha inválidos.",
+            "connection": "Não é possível conectar à National Grid.",
+            "unknown": "Ocorreu um erro inesperado.",
+            "no_accounts_selected": "Por favor, selecione pelo menos uma conta."
+        },
+        "abort": {
+            "already_configured": "Esta conta já está configurada.",
+            "reauth_successful": "Reautenticação bem-sucedida.",
+            "reconfigure_successful": "Seleção de conta atualizada com sucesso."
+        }
+    },
+    "services": {
+        "force_full_refresh": {
+            "name": "Atualização completa forçada",
+            "description": "Aciona uma atualização completa dos dados históricos para as estatísticas da National Grid. Serão buscados até 5 anos de dados AMI de 15 minutos e dados de intervalo, reimportando todas as estatísticas.",
+            "fields": {
+                "entry_id": {
+                    "name": "ID de entrada de configuração",
+                    "description": "Opcional. O ID de entrada de configuração de uma integração específica da National Grid a atualizar."
+                }
+            }
+        }
+    },
+    "entity": {
+        "sensor": {
+            "energy_usage": {
+                "name": "Último uso faturado"
+            },
+            "energy_cost": {
+                "name": "Último custo faturado"
+            },
+            "current_bill_amount": {
+                "name": "Fatura atual"
+            },
+            "next_reading_date": {
+                "name": "Próxima data de leitura"
+            },
+            "cost_per_unit": {
+                "name": "Custo médio por unidade"
+            }
+        },
+        "binary_sensor": {
+            "has_smart_meter": {
+                "name": "Medidor inteligente"
+            }
+        }
+    }
+}

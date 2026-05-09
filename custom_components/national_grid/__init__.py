@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import voluptuous as vol
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_track_time_change
 
 from .const import _LOGGER, DOMAIN
@@ -61,6 +62,20 @@ async def async_setup_entry(
 
     await coordinator.async_config_entry_first_refresh()
     await async_import_all_statistics(hass, coordinator)
+
+    # Pre-register Account devices so via_device links resolve correctly when
+    # Meter entities from other platforms (binary_sensor, button) are registered.
+    registry = dr.async_get(hass)
+    for account_id in coordinator.data.accounts:
+        registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, account_id)},
+            name=f"National Grid {account_id}",
+            manufacturer="National Grid",
+            entry_type=dr.DeviceEntryType.SERVICE,
+            configuration_url="https://myaccount.nationalgrid.com",
+        )
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # Re-import statistics on each coordinator update.

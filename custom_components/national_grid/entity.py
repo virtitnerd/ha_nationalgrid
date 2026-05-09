@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import ATTRIBUTION, DOMAIN
@@ -50,11 +50,13 @@ class NationalGridEntity(CoordinatorEntity[NationalGridDataUpdateCoordinator]):
         has_ami = bool(meter.get("hasAmiSmartMeter", False))
         is_smart = bool(meter.get("isSmartMeter", False))
 
-        # Build device name
+        # Build device name — account_id + service_point ensures uniqueness across
+        # multiple accounts (where SP numbers like 100/200 repeat).
+        account_id = meter_data.account_id
         name = (
-            f"{fuel_type.title()} Meter"
+            f"{fuel_type.title()} Meter {account_id}-{self._service_point_number}"
             if fuel_type
-            else f"Meter {self._service_point_number}"
+            else f"Meter {account_id}-{self._service_point_number}"
         )
 
         # Determine model based on meter capabilities
@@ -87,6 +89,7 @@ class NationalGridEntity(CoordinatorEntity[NationalGridDataUpdateCoordinator]):
 
         return DeviceInfo(
             identifiers={(DOMAIN, self._service_point_number)},
+            via_device=(DOMAIN, meter_data.account_id),
             serial_number=meter_number,
             name=name,
             manufacturer="National Grid",
@@ -112,3 +115,26 @@ class NationalGridEntity(CoordinatorEntity[NationalGridDataUpdateCoordinator]):
         """Return the billing account data."""
         meter_data = self.coordinator.get_meter_data(self._service_point_number)
         return meter_data.billing_account if meter_data else None
+
+
+class NationalGridAccountEntity(CoordinatorEntity[NationalGridDataUpdateCoordinator]):
+    """Base entity class for account-level National Grid entities."""
+
+    _attr_attribution = ATTRIBUTION
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: NationalGridDataUpdateCoordinator,
+        account_id: str,
+    ) -> None:
+        """Initialize the account entity."""
+        super().__init__(coordinator)
+        self._account_id = account_id
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, account_id)},
+            name=f"National Grid {account_id}",
+            manufacturer="National Grid",
+            entry_type=DeviceEntryType.SERVICE,
+            configuration_url="https://myaccount.nationalgrid.com",
+        )

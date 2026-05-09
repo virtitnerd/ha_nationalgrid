@@ -77,7 +77,7 @@ async def test_import_hourly_stats(mock_get_instance, mock_add_stats, hass) -> N
     assert mock_add_stats.called
     metadata = mock_add_stats.call_args[0][1]
     stats = mock_add_stats.call_args[0][2]
-    assert metadata["statistic_id"] == "national_grid:SP1_electric_hourly_usage"
+    assert metadata["statistic_id"] == "national_grid:acct1_SP1_electric_hourly_usage"
     # Both readings fall within the same clock hour so they are bucketed into one stat
     assert len(stats) == 1
     assert stats[0]["state"] == 8.0  # 5.0 + 3.0 aggregated into the 10:00 bucket
@@ -111,7 +111,7 @@ async def test_import_hourly_stats_with_existing_sum(
     """Test AMI stats continues from last imported sum on incremental updates."""
     # Return existing statistics with a sum and timestamp
     existing = {
-        "national_grid:SP1_electric_hourly_usage": [
+        "national_grid:acct1_SP1_electric_hourly_usage": [
             {"sum": 10.0, "start": 1736935200.0}  # 2025-01-15T10:00:00 UTC
         ]
     }
@@ -281,7 +281,7 @@ async def test_import_meter_statistics_electric(
     assert mock_add_stats.called
     metadata = mock_add_stats.call_args[0][1]
     stats = mock_add_stats.call_args[0][2]
-    assert metadata["statistic_id"] == "national_grid:SP1_electric_hourly_usage"
+    assert metadata["statistic_id"] == "national_grid:acct1_SP1_electric_hourly_usage"
     assert stats[0]["state"] == 7.0
 
 
@@ -304,7 +304,7 @@ async def test_import_meter_statistics_gas(
 
     assert mock_add_stats.called
     metadata = mock_add_stats.call_args[0][1]
-    assert metadata["statistic_id"] == "national_grid:SP1_gas_hourly_usage"
+    assert metadata["statistic_id"] == "national_grid:acct1_SP1_gas_hourly_usage"
 
 
 async def test_import_meter_statistics_no_data(hass) -> None:
@@ -570,7 +570,7 @@ async def test_midnight_refresh_continues_from_existing_sum(
 ) -> None:
     """Test midnight refresh queries pre-window stats and continues the sum."""
     existing = {
-        "national_grid:SP1_electric_hourly_usage": [
+        "national_grid:acct1_SP1_electric_hourly_usage": [
             {"sum": 50.0, "start": 1736848800.0}
         ]
     }
@@ -732,3 +732,47 @@ def test_data_module_importable() -> None:
     from custom_components.national_grid import data
 
     assert hasattr(data, "NationalGridConfigEntry")
+
+
+@patch("custom_components.national_grid.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid.statistics.get_instance")
+async def test_import_ami_stats_with_negative_creates_return_series(
+    mock_get_instance, mock_add_stats, hass
+) -> None:
+    """Test negative AMI readings produce a separate electric return stat series."""
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
+
+    readings = [
+        {"date": "2025-01-15T10:00:00.000Z", "quantity": 5.0},
+        {"date": "2025-01-15T11:00:00.000Z", "quantity": -1.5},
+    ]
+    coordinator = MagicMock()
+    coordinator.data = _make_coordinator_data(
+        ami_usages={"SP1": readings},
+        meters={"SP1": _make_meter_data("Electric")},
+    )
+
+    await async_import_all_statistics(hass, coordinator)
+
+    stat_ids = [call[0][1]["statistic_id"] for call in mock_add_stats.call_args_list]
+    assert any("electric_return_hourly_usage" in sid for sid in stat_ids)
+    assert any("acct1_SP1" in sid for sid in stat_ids)
+
+
+async def test_import_all_statistics_skips_interval_reads_with_unknown_sp(hass) -> None:
+    """Test interval_reads for unknown service points are skipped gracefully."""
+    coordinator = MagicMock()
+    coordinator.data = _make_coordinator_data(
+        ami_usages={},
+        meters={},  # no meters registered
+    )
+    # interval_reads references a SP that has no meter entry
+    coordinator.data.interval_reads = {
+        "SP_UNKNOWN": [{"startTime": "2025-01-15T10:00:00+00:00", "value": 0.5}]
+    }
+
+    with patch(
+        "custom_components.national_grid.statistics.async_add_external_statistics"
+    ) as mock_add:
+        await async_import_all_statistics(hass, coordinator)
+        assert not mock_add.called

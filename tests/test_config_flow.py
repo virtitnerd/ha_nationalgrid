@@ -38,7 +38,7 @@ async def test_user_step_shows_form(hass: HomeAssistant) -> None:
 
 
 async def test_user_step_single_account(hass: HomeAssistant) -> None:
-    """Test user step with a single account creates entry directly."""
+    """Test user step with a single account still shows the account selection step."""
     with patch(PATCH_CLIENT) as mock_cls:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
@@ -54,6 +54,14 @@ async def test_user_step_single_account(hass: HomeAssistant) -> None:
                 CONF_USERNAME: MOCK_USERNAME,
                 CONF_PASSWORD: MOCK_PASSWORD,
             },
+        )
+
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "select_accounts"
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_SELECTED_ACCOUNTS: [MOCK_ACCOUNT_ID]},
         )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -363,6 +371,158 @@ async def test_reauth_confirm_unknown_error(hass: HomeAssistant) -> None:
                 CONF_PASSWORD: "new_password",
             },
         )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"]["base"] == "unknown"
+
+
+def _make_reconfigure_entry(hass: HomeAssistant) -> MockConfigEntry:
+    """Create and register a config entry for reconfigure tests."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=MOCK_USERNAME,
+        data={
+            CONF_USERNAME: MOCK_USERNAME,
+            CONF_PASSWORD: MOCK_PASSWORD,
+            CONF_SELECTED_ACCOUNTS: [MOCK_ACCOUNT_ID],
+        },
+        unique_id="testuser-example-com",
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def test_reconfigure_shows_form_with_current_selection(
+    hass: HomeAssistant,
+) -> None:
+    """Test reconfigure step shows account selector pre-filled with current accounts."""
+    entry = _make_reconfigure_entry(hass)
+
+    with patch(PATCH_CLIENT) as mock_cls:
+        client = mock_cls.return_value
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get_linked_accounts = AsyncMock(
+            return_value=[
+                {"billingAccountId": MOCK_ACCOUNT_ID},
+                {"billingAccountId": MOCK_ACCOUNT_ID_2},
+            ],
+        )
+
+        result = await entry.start_reconfigure_flow(hass)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+
+
+async def test_reconfigure_updates_selected_accounts(hass: HomeAssistant) -> None:
+    """Test reconfigure saves new account selection and reloads."""
+    entry = _make_reconfigure_entry(hass)
+
+    with patch(PATCH_CLIENT) as mock_cls:
+        client = mock_cls.return_value
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get_linked_accounts = AsyncMock(
+            return_value=[
+                {"billingAccountId": MOCK_ACCOUNT_ID},
+                {"billingAccountId": MOCK_ACCOUNT_ID_2},
+            ],
+        )
+
+        result = await entry.start_reconfigure_flow(hass)
+        assert result["step_id"] == "reconfigure"
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_SELECTED_ACCOUNTS: [MOCK_ACCOUNT_ID, MOCK_ACCOUNT_ID_2]},
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert set(entry.data[CONF_SELECTED_ACCOUNTS]) == {
+        MOCK_ACCOUNT_ID,
+        MOCK_ACCOUNT_ID_2,
+    }
+
+
+async def test_reconfigure_no_accounts_selected_shows_error(
+    hass: HomeAssistant,
+) -> None:
+    """Test reconfigure shows error when no accounts are selected."""
+    entry = _make_reconfigure_entry(hass)
+
+    with patch(PATCH_CLIENT) as mock_cls:
+        client = mock_cls.return_value
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get_linked_accounts = AsyncMock(
+            return_value=[
+                {"billingAccountId": MOCK_ACCOUNT_ID},
+                {"billingAccountId": MOCK_ACCOUNT_ID_2},
+            ],
+        )
+
+        result = await entry.start_reconfigure_flow(hass)
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_SELECTED_ACCOUNTS: []},
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"]["base"] == "no_accounts_selected"
+
+
+async def test_reconfigure_auth_error(hass: HomeAssistant) -> None:
+    """Test reconfigure shows auth error when credentials are no longer valid."""
+    entry = _make_reconfigure_entry(hass)
+
+    with patch(PATCH_CLIENT) as mock_cls:
+        client = mock_cls.return_value
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get_linked_accounts = AsyncMock(
+            side_effect=InvalidAuthError("Bad creds"),
+        )
+
+        result = await entry.start_reconfigure_flow(hass)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"]["base"] == "auth"
+
+
+async def test_reconfigure_connection_error(hass: HomeAssistant) -> None:
+    """Test reconfigure shows connection error when API is unreachable."""
+    entry = _make_reconfigure_entry(hass)
+
+    with patch(PATCH_CLIENT) as mock_cls:
+        client = mock_cls.return_value
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get_linked_accounts = AsyncMock(
+            side_effect=CannotConnectError("Timeout"),
+        )
+
+        result = await entry.start_reconfigure_flow(hass)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"]["base"] == "connection"
+
+
+async def test_reconfigure_unknown_error(hass: HomeAssistant) -> None:
+    """Test reconfigure shows unknown error for unexpected API errors."""
+    entry = _make_reconfigure_entry(hass)
+
+    with patch(PATCH_CLIENT) as mock_cls:
+        client = mock_cls.return_value
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get_linked_accounts = AsyncMock(
+            side_effect=NationalGridError("Server error"),
+        )
+
+        result = await entry.start_reconfigure_flow(hass)
 
     assert result["type"] is FlowResultType.FORM
     assert result["errors"]["base"] == "unknown"

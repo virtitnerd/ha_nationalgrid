@@ -69,18 +69,17 @@ def _mock_usages() -> list[dict]:
 
 
 def _mock_costs() -> list[dict]:
-    """Return mock energy costs."""
+    """Return mock energy costs.
+
+    month is 1-12 (not year-aware); date is YYYY-MM-01 and is the correct
+    field to sort by for most-recent detection.  Includes a December→January
+    year boundary so tests can verify date-based ordering is used.
+    """
     return [
-        {
-            "fuelType": "ELECTRIC",
-            "month": 202501,
-            "amount": 120.50,
-        },
-        {
-            "fuelType": "GAS",
-            "month": 202501,
-            "amount": 45.00,
-        },
+        {"fuelType": "ELECTRIC", "month": 12, "date": "2024-12-01", "amount": 105.00},
+        {"fuelType": "GAS", "month": 12, "date": "2024-12-01", "amount": 38.00},
+        {"fuelType": "ELECTRIC", "month": 1, "date": "2025-01-01", "amount": 120.50},
+        {"fuelType": "GAS", "month": 1, "date": "2025-01-01", "amount": 45.00},
     ]
 
 
@@ -108,4 +107,42 @@ def _mock_interval_reads() -> list[dict]:
             "endTime": "2025-01-15T10:30:00.000Z",
             "quantity": 0.4,
         },
+    ]
+
+
+def _mock_bills(account_id: str = MOCK_ACCOUNT_ID) -> list[dict]:
+    """Return mock bill history (newest first)."""
+    return [
+        {
+            "accountNumber": account_id,
+            "statementDate": "2025-01-01",
+            "dueDate": "2025-01-22",
+            "status": "UNPAID",
+            "currentChargesAmount": 145.50,
+            "totalDueAmount": 145.50,
+        },
+        {
+            "accountNumber": account_id,
+            "statementDate": "2024-12-01",
+            "dueDate": "2024-12-22",
+            "status": "PAID",
+            "currentChargesAmount": 132.00,
+            "totalDueAmount": 132.00,
+        },
+    ]
+
+
+def _mock_account_links(
+    account_id: str = MOCK_ACCOUNT_ID,
+    next_reading_date: str | None = "2025-02-15",
+) -> list[dict]:
+    """Return mock linked accounts."""
+    return [
+        {
+            "billingAccountId": account_id,
+            "billingAccount": {
+                "billingAccountId": account_id,
+                "nextSchedReadingDate": next_reading_date,
+            },
+        }
     ]

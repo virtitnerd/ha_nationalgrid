@@ -21,8 +21,10 @@ from .conftest import (
     MOCK_PASSWORD,
     MOCK_SERVICE_POINT,
     MOCK_USERNAME,
+    _mock_account_links,
     _mock_ami_usages,
     _mock_billing_account,
+    _mock_bills,
     _mock_costs,
     _mock_interval_reads,
     _mock_usages,
@@ -124,6 +126,8 @@ def _make_api_mock() -> AsyncMock:
     api.get_ami_energy_usages = AsyncMock(return_value=_mock_ami_usages())
     api.get_ami_energy_usages_15min = AsyncMock(return_value=_mock_ami_usages())
     api.get_interval_reads = AsyncMock(return_value=_mock_interval_reads())
+    api.get_linked_accounts = AsyncMock(return_value=_mock_account_links())
+    api.get_bills = AsyncMock(return_value=_mock_bills())
     return api
 
 

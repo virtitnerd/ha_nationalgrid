@@ -732,3 +732,28 @@ def test_data_module_importable() -> None:
     from custom_components.national_grid import data
 
     assert hasattr(data, "NationalGridConfigEntry")
+
+
+@patch("custom_components.national_grid.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid.statistics.get_instance")
+async def test_import_ami_stats_with_negative_creates_return_series(
+    mock_get_instance, mock_add_stats, hass
+) -> None:
+    """Test that negative AMI readings produce a separate electric return stat series."""
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
+
+    readings = [
+        {"date": "2025-01-15T10:00:00.000Z", "quantity": 5.0},
+        {"date": "2025-01-15T11:00:00.000Z", "quantity": -1.5},
+    ]
+    coordinator = MagicMock()
+    coordinator.data = _make_coordinator_data(
+        ami_usages={"SP1": readings},
+        meters={"SP1": _make_meter_data("Electric")},
+    )
+
+    await async_import_all_statistics(hass, coordinator)
+
+    stat_ids = [call[0][1]["statistic_id"] for call in mock_add_stats.call_args_list]
+    assert any("electric_return_hourly_usage" in sid for sid in stat_ids)
+    assert any("acct1_SP1" in sid for sid in stat_ids)

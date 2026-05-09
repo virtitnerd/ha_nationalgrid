@@ -345,13 +345,13 @@ def test_cost_per_unit_no_matching_months_returns_zero() -> None:
 
 
 def test_cost_per_unit_unit_electric() -> None:
-    """Test cost per unit label for electric meter."""
-    assert _get_cost_per_unit_unit(_make_meter_data_with_fuel("Electric")) == "$/kWh"
+    """Test cost per unit label for electric meter uses ISO currency format."""
+    assert _get_cost_per_unit_unit(_make_meter_data_with_fuel("Electric")) == "USD/kWh"
 
 
 def test_cost_per_unit_unit_gas() -> None:
-    """Test cost per unit label for gas meter."""
-    assert _get_cost_per_unit_unit(_make_meter_data_with_fuel("Gas")) == "$/CCF"
+    """Test cost per unit label for gas meter uses ISO currency format."""
+    assert _get_cost_per_unit_unit(_make_meter_data_with_fuel("Gas")) == "USD/CCF"
 
 
 def test_cost_per_unit_in_sensor_descriptions() -> None:

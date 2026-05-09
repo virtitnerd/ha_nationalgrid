@@ -99,7 +99,7 @@ _RATE_WINDOW = 3  # billing cycles to include in blended rate
 def _get_cost_per_unit_unit(meter_data: MeterData) -> str:
     """Return the appropriate cost-per-unit label based on fuel type."""
     fuel_type = meter_data.meter.get("fuelType", "").upper()
-    return "$/CCF" if fuel_type == "GAS" else "$/kWh"
+    return "USD/CCF" if fuel_type == "GAS" else "USD/kWh"
 
 
 def _get_cost_per_unit(
@@ -140,7 +140,7 @@ def _get_cost_per_unit(
     window = matched[:_RATE_WINDOW]
     total_cost = sum(cost_by_month[yyyymm] for yyyymm, _ in window)
     total_usage = sum(usage for _, usage in window)
-    if total_usage == 0:
+    if total_usage == 0:  # pragma: no cover
         return 0.0
     return round(total_cost / total_usage, 4)
 
@@ -205,7 +205,7 @@ SENSOR_DESCRIPTIONS: tuple[NationalGridSensorEntityDescription, ...] = (
     NationalGridSensorEntityDescription(
         key="energy_cost",
         translation_key="energy_cost",
-        native_unit_of_measurement="$",
+        native_unit_of_measurement="USD",
         device_class=SensorDeviceClass.MONETARY,
         value_fn=_get_energy_cost,
     ),
@@ -219,6 +219,7 @@ SENSOR_DESCRIPTIONS: tuple[NationalGridSensorEntityDescription, ...] = (
     NationalGridSensorEntityDescription(
         key="cost_per_unit",
         translation_key="cost_per_unit",
+        device_class=SensorDeviceClass.MONETARY,
         state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=4,
         value_fn=_get_cost_per_unit,

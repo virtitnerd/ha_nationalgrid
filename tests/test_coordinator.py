@@ -482,6 +482,22 @@ async def test_get_latest_ami_usage_no_readings(hass: HomeAssistant) -> None:
     assert coordinator.get_latest_ami_usage("NONEXISTENT_SP") is None
 
 
+async def test_get_current_bill_none_when_no_data(hass: HomeAssistant) -> None:
+    """Test get_current_bill returns None when data is None."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = None
+    assert coordinator.get_current_bill("acct1") is None
+
+
+async def test_get_next_reading_date_none_when_no_data(hass: HomeAssistant) -> None:
+    """Test get_next_reading_date returns None when data is None."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = None
+    assert coordinator.get_next_reading_date("acct1") is None
+
+
 # ---------------------------------------------------------------------------
 # async_initialize tests
 # ---------------------------------------------------------------------------

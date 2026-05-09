@@ -90,6 +90,7 @@ National Grid {account_id}          ← Account device (one per billing account)
   └── Electric Meter {account_id}-{sp}   ← Meter device (one per service point)
         ├── sensor: Last Billing Usage
         ├── sensor: Last Billing Cost
+        ├── sensor: Avg Cost per Unit
         ├── binary_sensor: Smart Meter
         └── button: Force Refresh
 ```
@@ -114,10 +115,11 @@ These sensors live on the account device and reflect account-level data.
 
 ### Meter Device Sensors
 
-| Entity             | Description                       | Unit                       | Device Class |
-| ------------------ | --------------------------------- | -------------------------- | ------------ |
-| Last Billing Usage | Most recent monthly billing usage | kWh (electric) / CCF (gas) | Energy / Gas |
-| Last Billing Cost  | Most recent monthly billing cost  | $                          | Monetary     |
+| Entity             | Description                                                          | Unit                       | Device Class |
+| ------------------ | -------------------------------------------------------------------- | -------------------------- | ------------ |
+| Last Billing Usage | Most recent monthly billing usage                                    | kWh (electric) / CCF (gas) | Energy / Gas |
+| Last Billing Cost  | Most recent monthly billing cost                                     | USD                        | Monetary     |
+| Avg Cost per Unit  | Blended rate over the last 3 billing cycles (total cost ÷ total usage) | USD/kWh (electric) / USD/CCF (gas) | Monetary |
 
 ### Binary Sensors
 

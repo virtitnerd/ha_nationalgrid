@@ -1,0 +1,79 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "description": "请输入您的 National Grid 账户凭据。",
+                "data": {
+                    "username": "用户名",
+                    "password": "密码"
+                }
+            },
+            "select_accounts": {
+                "description": "选择要监控的账单账户。",
+                "data": {
+                    "selected_accounts": "账单账户"
+                }
+            },
+            "reauth_confirm": {
+                "description": "请重新输入您的 National Grid 凭据。",
+                "data": {
+                    "username": "用户名",
+                    "password": "密码"
+                }
+            },
+            "reconfigure": {
+                "description": "更新要监控的 National Grid 账户。",
+                "data": {
+                    "selected_accounts": "账单账户"
+                }
+            }
+        },
+        "error": {
+            "auth": "用户名或密码无效。",
+            "connection": "无法连接到 National Grid。",
+            "unknown": "发生了意外错误。",
+            "no_accounts_selected": "请至少选择一个账户。"
+        },
+        "abort": {
+            "already_configured": "此账户已配置。",
+            "reauth_successful": "重新认证成功。",
+            "reconfigure_successful": "账户选择更新成功。"
+        }
+    },
+    "services": {
+        "force_full_refresh": {
+            "name": "强制完整刷新",
+            "description": "触发 National Grid 统计数据的完整历史数据刷新。将获取最多 5 年的 AMI 每小时数据和区间数据，重新导入所有统计数据。",
+            "fields": {
+                "entry_id": {
+                    "name": "配置条目 ID",
+                    "description": "可选。要刷新的特定 National Grid 集成的配置条目 ID。"
+                }
+            }
+        }
+    },
+    "entity": {
+        "sensor": {
+            "energy_usage": {
+                "name": "上期账单用量"
+            },
+            "energy_cost": {
+                "name": "上期账单费用"
+            },
+            "current_bill_amount": {
+                "name": "当前账单"
+            },
+            "next_reading_date": {
+                "name": "下次抄表日期"
+            },
+            "cost_per_unit": {
+                "name": "平均单位成本"
+            }
+        },
+        "binary_sensor": {
+            "has_smart_meter": {
+                "name": "智能电表"
+            }
+        }
+    }
+}

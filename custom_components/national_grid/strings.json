@@ -67,7 +67,7 @@
                 "name": "Next Reading Date"
             },
             "cost_per_unit": {
-                "name": "Cost per Unit"
+                "name": "Avg Cost per Unit"
             }
         },
         "binary_sensor": {

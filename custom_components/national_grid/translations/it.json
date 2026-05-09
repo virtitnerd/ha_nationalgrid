@@ -1,0 +1,79 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "description": "Inserisci le credenziali del tuo account National Grid.",
+                "data": {
+                    "username": "Nome utente",
+                    "password": "Password"
+                }
+            },
+            "select_accounts": {
+                "description": "Seleziona i conti di fatturazione da monitorare.",
+                "data": {
+                    "selected_accounts": "Conti di fatturazione"
+                }
+            },
+            "reauth_confirm": {
+                "description": "Inserisci nuovamente le credenziali National Grid.",
+                "data": {
+                    "username": "Nome utente",
+                    "password": "Password"
+                }
+            },
+            "reconfigure": {
+                "description": "Aggiorna i conti National Grid da monitorare.",
+                "data": {
+                    "selected_accounts": "Conti di fatturazione"
+                }
+            }
+        },
+        "error": {
+            "auth": "Nome utente o password non validi.",
+            "connection": "Impossibile connettersi a National Grid.",
+            "unknown": "Si è verificato un errore imprevisto.",
+            "no_accounts_selected": "Seleziona almeno un conto."
+        },
+        "abort": {
+            "already_configured": "Questo account è già configurato.",
+            "reauth_successful": "Riautenticazione riuscita.",
+            "reconfigure_successful": "Selezione account aggiornata con successo."
+        }
+    },
+    "services": {
+        "force_full_refresh": {
+            "name": "Aggiornamento completo forzato",
+            "description": "Avvia un aggiornamento completo dei dati storici per le statistiche di National Grid. Verranno recuperati fino a 5 anni di dati AMI orari e dati di intervallo, reimportando tutte le statistiche.",
+            "fields": {
+                "entry_id": {
+                    "name": "ID voce di configurazione",
+                    "description": "Facoltativo. L'ID voce di configurazione di una specifica integrazione National Grid da aggiornare."
+                }
+            }
+        }
+    },
+    "entity": {
+        "sensor": {
+            "energy_usage": {
+                "name": "Ultimo consumo fatturato"
+            },
+            "energy_cost": {
+                "name": "Ultimo costo fatturato"
+            },
+            "current_bill_amount": {
+                "name": "Bolletta corrente"
+            },
+            "next_reading_date": {
+                "name": "Prossima data di lettura"
+            },
+            "cost_per_unit": {
+                "name": "Costo medio per unità"
+            }
+        },
+        "binary_sensor": {
+            "has_smart_meter": {
+                "name": "Contatore intelligente"
+            }
+        }
+    }
+}

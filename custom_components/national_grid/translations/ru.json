@@ -1,0 +1,79 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "description": "Введите данные учётной записи National Grid.",
+                "data": {
+                    "username": "Имя пользователя",
+                    "password": "Пароль"
+                }
+            },
+            "select_accounts": {
+                "description": "Выберите платёжные счета для мониторинга.",
+                "data": {
+                    "selected_accounts": "Платёжные счета"
+                }
+            },
+            "reauth_confirm": {
+                "description": "Пожалуйста, введите данные National Grid повторно.",
+                "data": {
+                    "username": "Имя пользователя",
+                    "password": "Пароль"
+                }
+            },
+            "reconfigure": {
+                "description": "Обновите выбор счетов National Grid для мониторинга.",
+                "data": {
+                    "selected_accounts": "Платёжные счета"
+                }
+            }
+        },
+        "error": {
+            "auth": "Неверное имя пользователя или пароль.",
+            "connection": "Не удаётся подключиться к National Grid.",
+            "unknown": "Произошла непредвиденная ошибка.",
+            "no_accounts_selected": "Пожалуйста, выберите хотя бы один счёт."
+        },
+        "abort": {
+            "already_configured": "Этот счёт уже настроен.",
+            "reauth_successful": "Повторная аутентификация выполнена успешно.",
+            "reconfigure_successful": "Выбор счёта успешно обновлён."
+        }
+    },
+    "services": {
+        "force_full_refresh": {
+            "name": "Принудительное полное обновление",
+            "description": "Запускает полное обновление исторических данных для статистики National Grid. Будут получены данные AMI за 5 лет и интервальные данные с полным реимпортом всей статистики.",
+            "fields": {
+                "entry_id": {
+                    "name": "ID записи конфигурации",
+                    "description": "Необязательно. ID записи конфигурации конкретной интеграции National Grid для обновления."
+                }
+            }
+        }
+    },
+    "entity": {
+        "sensor": {
+            "energy_usage": {
+                "name": "Последнее потребление по счёту"
+            },
+            "energy_cost": {
+                "name": "Последняя стоимость по счёту"
+            },
+            "current_bill_amount": {
+                "name": "Текущий счёт"
+            },
+            "next_reading_date": {
+                "name": "Дата следующего снятия показаний"
+            },
+            "cost_per_unit": {
+                "name": "Средняя стоимость за единицу"
+            }
+        },
+        "binary_sensor": {
+            "has_smart_meter": {
+                "name": "Умный счётчик"
+            }
+        }
+    }
+}

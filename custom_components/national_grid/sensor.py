@@ -10,7 +10,6 @@ from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
-    SensorStateClass,
 )
 from homeassistant.const import EntityCategory
 
@@ -220,7 +219,6 @@ SENSOR_DESCRIPTIONS: tuple[NationalGridSensorEntityDescription, ...] = (
         key="cost_per_unit",
         translation_key="cost_per_unit",
         device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=4,
         value_fn=_get_cost_per_unit,
         unit_fn=_get_cost_per_unit_unit,

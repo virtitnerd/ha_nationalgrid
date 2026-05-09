@@ -2,5 +2,7 @@
     "name": "National Grid Integration",
     "homeassistant": "2025.2.4",
     "hacs": "2.0.5",
-    "country": "US"
+    "country": "US",
+    "zip_release": true,
+    "filename": "national_grid.zip"
 }

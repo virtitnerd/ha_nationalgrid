@@ -9,13 +9,18 @@ from homeassistant.components.sensor import SensorDeviceClass
 from custom_components.national_grid.const import UNIT_CCF, UNIT_KWH
 from custom_components.national_grid.coordinator import MeterData
 from custom_components.national_grid.sensor import (
+    ACCOUNT_SENSOR_DESCRIPTIONS,
     PARALLEL_UPDATES,
     SENSOR_DESCRIPTIONS,
+    NationalGridAccountSensor,
     NationalGridSensor,
+    _get_current_bill_amount,
+    _get_current_bill_attributes,
     _get_energy_cost,
     _get_energy_device_class,
     _get_energy_unit,
     _get_energy_usage,
+    _get_next_reading_date,
 )
 
 
@@ -124,3 +129,127 @@ def test_sensor_native_value_none_when_no_meter_data() -> None:
     coordinator.get_meter_data.return_value = None
 
     assert sensor.native_value is None
+
+
+def _make_mock_bill() -> dict:
+    return {
+        "accountNumber": "acct1",
+        "statementDate": "2025-01-01",
+        "dueDate": "2025-01-22",
+        "status": "UNPAID",
+        "currentChargesAmount": 145.50,
+        "totalDueAmount": 145.50,
+    }
+
+
+def test_current_bill_amount_returns_current_charges() -> None:
+    """Test _get_current_bill_amount returns currentChargesAmount."""
+    coordinator = MagicMock()
+    coordinator.get_current_bill.return_value = _make_mock_bill()
+    assert _get_current_bill_amount(coordinator, "acct1") == 145.50
+
+
+def test_current_bill_amount_none_when_no_bill() -> None:
+    """Test _get_current_bill_amount returns None when no bill available."""
+    coordinator = MagicMock()
+    coordinator.get_current_bill.return_value = None
+    assert _get_current_bill_amount(coordinator, "acct1") is None
+
+
+def test_current_bill_attributes_returns_due_date_and_status() -> None:
+    """Test _get_current_bill_attributes returns expected dict."""
+    coordinator = MagicMock()
+    coordinator.get_current_bill.return_value = _make_mock_bill()
+    attrs = _get_current_bill_attributes(coordinator, "acct1")
+    assert attrs["due_date"] == "2025-01-22"
+    assert attrs["statement_date"] == "2025-01-01"
+    assert attrs["status"] == "UNPAID"
+    assert attrs["total_due"] == 145.50
+
+
+def test_current_bill_attributes_empty_when_no_bill() -> None:
+    """Test _get_current_bill_attributes returns empty dict when no bill."""
+    coordinator = MagicMock()
+    coordinator.get_current_bill.return_value = None
+    assert _get_current_bill_attributes(coordinator, "acct1") == {}
+
+
+def test_account_sensor_extra_state_attributes() -> None:
+    """Test NationalGridAccountSensor.extra_state_attributes calls attributes_fn."""
+    coordinator = MagicMock()
+    coordinator.config_entry = MagicMock()
+    coordinator.config_entry.entry_id = "test_entry"
+    coordinator.get_current_bill.return_value = _make_mock_bill()
+
+    # current_bill_amount is the first description (index 0)
+    bill_description = ACCOUNT_SENSOR_DESCRIPTIONS[0]
+    sensor = NationalGridAccountSensor(coordinator, "acct1", bill_description)
+    attrs = sensor.extra_state_attributes
+    assert attrs is not None
+    assert attrs["due_date"] == "2025-01-22"
+
+
+def test_account_sensor_extra_state_attributes_none_when_no_fn() -> None:
+    """Test extra_state_attributes returns None when no attributes_fn set."""
+    coordinator = MagicMock()
+    coordinator.config_entry = MagicMock()
+    coordinator.config_entry.entry_id = "test_entry"
+    coordinator.get_next_reading_date.return_value = None
+
+    # next_reading_date is the second description (index 1) — no attributes_fn
+    date_description = ACCOUNT_SENSOR_DESCRIPTIONS[1]
+    sensor = NationalGridAccountSensor(coordinator, "acct1", date_description)
+    assert sensor.extra_state_attributes is None
+
+
+def test_next_reading_date_returns_date() -> None:
+    """Test _get_next_reading_date parses ISO date string correctly."""
+    from datetime import date
+
+    coordinator = MagicMock()
+    coordinator.get_next_reading_date.return_value = "2025-06-15"
+    result = _get_next_reading_date(coordinator, "acct1")
+    assert result == date(2025, 6, 15)
+
+
+def test_next_reading_date_none_when_missing() -> None:
+    """Test _get_next_reading_date returns None when no date is available."""
+    coordinator = MagicMock()
+    coordinator.get_next_reading_date.return_value = None
+    assert _get_next_reading_date(coordinator, "acct1") is None
+
+
+def test_next_reading_date_none_on_invalid_format() -> None:
+    """Test _get_next_reading_date returns None for unparseable strings."""
+    coordinator = MagicMock()
+    coordinator.get_next_reading_date.return_value = "not-a-date"
+    assert _get_next_reading_date(coordinator, "acct1") is None
+
+
+def test_account_sensor_unique_id() -> None:
+    """Test NationalGridAccountSensor unique_id is derived from account_id + key."""
+    coordinator = MagicMock()
+    coordinator.config_entry = MagicMock()
+    coordinator.config_entry.entry_id = "test_entry"
+    # next_reading_date is index 1; current_bill_amount is index 0
+    next_reading_desc = next(
+        d for d in ACCOUNT_SENSOR_DESCRIPTIONS if d.key == "next_reading_date"
+    )
+    sensor = NationalGridAccountSensor(coordinator, "acct1", next_reading_desc)
+    assert sensor.unique_id == "national_grid_acct1_next_reading_date"
+
+
+def test_account_sensor_native_value() -> None:
+    """Test NationalGridAccountSensor.native_value calls value_fn with account_id."""
+    from datetime import date
+
+    coordinator = MagicMock()
+    coordinator.config_entry = MagicMock()
+    coordinator.config_entry.entry_id = "test_entry"
+    coordinator.get_next_reading_date.return_value = "2025-09-01"
+
+    next_reading_desc = next(
+        d for d in ACCOUNT_SENSOR_DESCRIPTIONS if d.key == "next_reading_date"
+    )
+    sensor = NationalGridAccountSensor(coordinator, "acct1", next_reading_desc)
+    assert sensor.native_value == date(2025, 9, 1)

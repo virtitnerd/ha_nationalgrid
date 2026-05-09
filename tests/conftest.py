@@ -109,3 +109,41 @@ def _mock_interval_reads() -> list[dict]:
             "quantity": 0.4,
         },
     ]
+
+
+def _mock_bills(account_id: str = MOCK_ACCOUNT_ID) -> list[dict]:
+    """Return mock bill history (newest first)."""
+    return [
+        {
+            "accountNumber": account_id,
+            "statementDate": "2025-01-01",
+            "dueDate": "2025-01-22",
+            "status": "UNPAID",
+            "currentChargesAmount": 145.50,
+            "totalDueAmount": 145.50,
+        },
+        {
+            "accountNumber": account_id,
+            "statementDate": "2024-12-01",
+            "dueDate": "2024-12-22",
+            "status": "PAID",
+            "currentChargesAmount": 132.00,
+            "totalDueAmount": 132.00,
+        },
+    ]
+
+
+def _mock_account_links(
+    account_id: str = MOCK_ACCOUNT_ID,
+    next_reading_date: str | None = "2025-02-15",
+) -> list[dict]:
+    """Return mock linked accounts."""
+    return [
+        {
+            "billingAccountId": account_id,
+            "billingAccount": {
+                "billingAccountId": account_id,
+                "nextSchedReadingDate": next_reading_date,
+            },
+        }
+    ]

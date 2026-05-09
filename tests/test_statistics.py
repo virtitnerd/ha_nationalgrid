@@ -77,7 +77,7 @@ async def test_import_hourly_stats(mock_get_instance, mock_add_stats, hass) -> N
     assert mock_add_stats.called
     metadata = mock_add_stats.call_args[0][1]
     stats = mock_add_stats.call_args[0][2]
-    assert metadata["statistic_id"] == "national_grid:SP1_electric_hourly_usage"
+    assert metadata["statistic_id"] == "national_grid:acct1_SP1_electric_hourly_usage"
     # Both readings fall within the same clock hour so they are bucketed into one stat
     assert len(stats) == 1
     assert stats[0]["state"] == 8.0  # 5.0 + 3.0 aggregated into the 10:00 bucket
@@ -111,7 +111,7 @@ async def test_import_hourly_stats_with_existing_sum(
     """Test AMI stats continues from last imported sum on incremental updates."""
     # Return existing statistics with a sum and timestamp
     existing = {
-        "national_grid:SP1_electric_hourly_usage": [
+        "national_grid:acct1_SP1_electric_hourly_usage": [
             {"sum": 10.0, "start": 1736935200.0}  # 2025-01-15T10:00:00 UTC
         ]
     }
@@ -281,7 +281,7 @@ async def test_import_meter_statistics_electric(
     assert mock_add_stats.called
     metadata = mock_add_stats.call_args[0][1]
     stats = mock_add_stats.call_args[0][2]
-    assert metadata["statistic_id"] == "national_grid:SP1_electric_hourly_usage"
+    assert metadata["statistic_id"] == "national_grid:acct1_SP1_electric_hourly_usage"
     assert stats[0]["state"] == 7.0
 
 
@@ -304,7 +304,7 @@ async def test_import_meter_statistics_gas(
 
     assert mock_add_stats.called
     metadata = mock_add_stats.call_args[0][1]
-    assert metadata["statistic_id"] == "national_grid:SP1_gas_hourly_usage"
+    assert metadata["statistic_id"] == "national_grid:acct1_SP1_gas_hourly_usage"
 
 
 async def test_import_meter_statistics_no_data(hass) -> None:
@@ -570,7 +570,7 @@ async def test_midnight_refresh_continues_from_existing_sum(
 ) -> None:
     """Test midnight refresh queries pre-window stats and continues the sum."""
     existing = {
-        "national_grid:SP1_electric_hourly_usage": [
+        "national_grid:acct1_SP1_electric_hourly_usage": [
             {"sum": 50.0, "start": 1736848800.0}
         ]
     }

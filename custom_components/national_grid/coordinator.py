@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from py_nationalgrid.models import (
         AmiEnergyUsage,
+        Bill,
         BillingAccount,
         EnergyUsage,
         EnergyUsageCost,
@@ -54,9 +55,11 @@ class NationalGridCoordinatorData:
 
     accounts: dict[str, BillingAccount]
     ami_usages: dict[str, list[AmiEnergyUsage]] = field(default_factory=dict)
+    bills: dict[str, list[Bill]] = field(default_factory=dict)
     costs: dict[str, list[EnergyUsageCost]] = field(default_factory=dict)
     interval_reads: dict[str, list[IntervalRead]] = field(default_factory=dict)
     meters: dict[str, MeterData] = field(default_factory=dict)
+    reading_dates: dict[str, str | None] = field(default_factory=dict)
     usages: dict[str, list[EnergyUsage]] = field(default_factory=dict)
     is_first_refresh: bool = False
     # Midnight refresh: force full hourly import + clear/reimport interval stats
@@ -224,6 +227,20 @@ class NationalGridDataUpdateCoordinator(
                 )
                 continue
 
+        # Fetch next scheduled reading dates (one per account, not per meter)
+        if not self._interval_only_mode:
+            try:
+                account_links = await self.api.get_linked_accounts()
+                for link in account_links:
+                    acct_id = link.get("billingAccountId", "")
+                    if acct_id in selected_accounts:
+                        billing = link.get("billingAccount") or {}
+                        data.reading_dates[acct_id] = billing.get(
+                            "nextSchedReadingDate"
+                        )
+            except (CannotConnectError, RetryExhaustedError, NationalGridError) as err:
+                _LOGGER.debug("Could not fetch next reading dates: %s", err)
+
         # Log completion at INFO level with summary
         if self._interval_only_mode:
             interval_count = sum(len(r) for r in data.interval_reads.values())
@@ -259,9 +276,11 @@ class NationalGridDataUpdateCoordinator(
         return NationalGridCoordinatorData(
             accounts=dict(prev.accounts),
             ami_usages=dict(prev.ami_usages),
+            bills=dict(prev.bills),
             costs=dict(prev.costs),
             interval_reads=dict(prev.interval_reads),
             meters=dict(prev.meters),
+            reading_dates=dict(prev.reading_dates),
             usages=dict(prev.usages),
         )
 
@@ -300,7 +319,7 @@ class NationalGridDataUpdateCoordinator(
                     meter.get("fuelType"),
                 )
 
-        # Skip usage/cost fetching in interval-only mode (doesn't change frequently)
+        # Skip usage/cost/bill fetching in interval-only mode
         if not self._interval_only_mode:
             # Fetch energy usages.
             data.usages[account_id] = await self._fetch_usages(account_id, from_month)
@@ -309,6 +328,9 @@ class NationalGridDataUpdateCoordinator(
             data.costs[account_id] = await self._fetch_costs(
                 account_id, today, billing_account
             )
+
+            # Fetch bill history.
+            data.bills[account_id] = await self._fetch_bills(account_id)
 
         # Fetch AMI and interval read data for AMI-capable meters.
         # In interval-only mode: skips slow GraphQL AMI fetch, does interval reads only.
@@ -396,6 +418,22 @@ class NationalGridDataUpdateCoordinator(
             return []
         else:
             return account_costs
+
+    async def _fetch_bills(self, account_id: str) -> list[Bill]:
+        """Fetch bill history for an account."""
+        try:
+            bills = await self.api.get_bills(account_id)
+            _LOGGER.debug("Fetched %s bills for account %s", len(bills), account_id)
+        except (
+            CannotConnectError,
+            RetryExhaustedError,
+            NationalGridError,
+            ValueError,
+        ) as err:
+            _LOGGER.debug("Could not fetch bills for account %s: %s", account_id, err)
+            return []
+        else:
+            return bills
 
     async def _fetch_ami_data(  # noqa: PLR0913
         self,
@@ -529,7 +567,7 @@ class NationalGridDataUpdateCoordinator(
             "premise_number": premise_number,
             "service_point_number": sp,
             "meter_point_number": str(meter.get("meterPointNumber", "")),
-            "fuel_type": meter.get("fuelType"),
+            "fuel_type": str(meter.get("fuelType", "")),
         }
 
         cutoff = today - timedelta(days=3)  # 72-hour boundary
@@ -562,7 +600,7 @@ class NationalGridDataUpdateCoordinator(
             bulk_data = await self.api.get_ami_energy_usages(
                 date_from=date_from,
                 date_to=cutoff,
-                **meter_kwargs,
+                **meter_kwargs,  # type: ignore[arg-type]
             )
         except (
             CannotConnectError,
@@ -581,7 +619,7 @@ class NationalGridDataUpdateCoordinator(
                     bulk_data = await self.api.get_ami_energy_usages_15min(
                         date_from=today - timedelta(days=50),
                         date_to=cutoff,
-                        **meter_kwargs,
+                        **meter_kwargs,  # type: ignore[arg-type]
                     )
                 except (
                     CannotConnectError,
@@ -603,7 +641,7 @@ class NationalGridDataUpdateCoordinator(
             recent_data = await self.api.get_ami_energy_usages_15min(
                 date_from=cutoff,
                 date_to=today,
-                **meter_kwargs,
+                **meter_kwargs,  # type: ignore[arg-type]
             )
         except (
             CannotConnectError,
@@ -647,6 +685,19 @@ class NationalGridDataUpdateCoordinator(
         if self.data is None:
             return None
         return self.data.meters.get(service_point_number)
+
+    def get_current_bill(self, account_id: str) -> Bill | None:
+        """Return the most recent bill for an account (bills are newest-first)."""
+        if self.data is None:
+            return None
+        bills = self.data.bills.get(account_id, [])
+        return bills[0] if bills else None
+
+    def get_next_reading_date(self, account_id: str) -> str | None:
+        """Get the next scheduled reading date for an account."""
+        if self.data is None:
+            return None
+        return self.data.reading_dates.get(account_id)
 
     def get_latest_usage(
         self, account_id: str, fuel_type: str | None = None

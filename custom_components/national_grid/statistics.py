@@ -72,27 +72,30 @@ def _build_statistic_metadata(
     }
     if HAS_MEAN_TYPE:
         kwargs["mean_type"] = StatisticMeanType.NONE  # pragma: no cover
-    return StatisticMetaData(**kwargs)
+    return StatisticMetaData(**kwargs)  # type: ignore[typeddict-item]
 
 
 def _resolve_hourly_stat_info(
     service_point: str,
+    account_id: str,
     *,
     is_gas: bool,
     return_only: bool,
 ) -> tuple[str, str, str, str, str]:
     """Return (statistic_id, fuel, unit, unit_class, stat_name)."""
+    prefix = f"{account_id}_{service_point}"
+    display = f"{account_id}-{service_point}"
     if is_gas:
         fuel = "gas"
-        stat_id = f"{DOMAIN}:{service_point}_{fuel}_hourly_usage"
-        return stat_id, fuel, "CCF", "volume", f"{service_point} Gas Hourly Usage"
+        stat_id = f"{DOMAIN}:{prefix}_{fuel}_hourly_usage"
+        return stat_id, fuel, "CCF", "volume", f"{display} Gas Hourly Usage"
     fuel = "electric"
     if return_only:
-        stat_id = f"{DOMAIN}:{service_point}_{fuel}_return_hourly_usage"
-        name = f"{service_point} Electric Return Hourly Usage"
+        stat_id = f"{DOMAIN}:{prefix}_{fuel}_return_hourly_usage"
+        name = f"{display} Electric Return Hourly Usage"
     else:
-        stat_id = f"{DOMAIN}:{service_point}_{fuel}_hourly_usage"
-        name = f"{service_point} Electric Hourly Usage"
+        stat_id = f"{DOMAIN}:{prefix}_{fuel}_hourly_usage"
+        name = f"{display} Electric Hourly Usage"
     return stat_id, fuel, UnitOfEnergy.KILO_WATT_HOUR, "energy", name
 
 
@@ -144,10 +147,12 @@ async def async_import_meter_statistics(
     fuel_type = str(meter_data.meter.get("fuelType", ""))
     is_gas = fuel_type == "Gas"
 
+    account_id = meter_data.account_id
     if is_gas:
         await _import_hourly_stats(
             hass,
             service_point,
+            account_id,
             ami_readings,
             is_gas=True,
             force_import_all=force_import_all,
@@ -156,6 +161,7 @@ async def async_import_meter_statistics(
         await _import_hourly_stats_electric(
             hass,
             service_point,
+            account_id,
             ami_readings,
             force_import_all=force_import_all,
         )
@@ -198,11 +204,13 @@ async def async_import_all_statistics(
             continue
         fuel_type = str(meter_data.meter.get("fuelType", ""))
         is_gas = fuel_type == "Gas"
+        account_id = meter_data.account_id
 
         if is_gas:
             await _import_hourly_stats(
                 hass,
                 sp,
+                account_id,
                 ami_readings,
                 is_gas=True,
                 force_import_all=force_hourly_import,
@@ -212,6 +220,7 @@ async def async_import_all_statistics(
             await _import_hourly_stats_electric(
                 hass,
                 sp,
+                account_id,
                 ami_readings,
                 force_import_all=force_hourly_import,
                 is_midnight_refresh=is_midnight_refresh,
@@ -219,14 +228,18 @@ async def async_import_all_statistics(
 
     # Import interval read stats (electric only; always cleared and reimported)
     for sp, reads in data.interval_reads.items():
-        await _import_interval_stats_electric(hass, sp, reads)
+        meter_data = data.meters.get(sp)
+        if meter_data is None:
+            continue
+        await _import_interval_stats_electric(hass, sp, meter_data.account_id, reads)
 
     _LOGGER.info("Statistics import complete")
 
 
-async def _import_hourly_stats_electric(
+async def _import_hourly_stats_electric(  # noqa: PLR0913
     hass: HomeAssistant,
     service_point: str,
+    account_id: str,
     readings: list,
     *,
     force_import_all: bool = False,
@@ -240,6 +253,7 @@ async def _import_hourly_stats_electric(
     await _import_hourly_stats(
         hass,
         service_point,
+        account_id,
         readings,
         is_gas=False,
         consumption_only=True,
@@ -252,6 +266,7 @@ async def _import_hourly_stats_electric(
         await _import_hourly_stats(
             hass,
             service_point,
+            account_id,
             readings,
             is_gas=False,
             return_only=True,
@@ -263,6 +278,7 @@ async def _import_hourly_stats_electric(
 async def _import_hourly_stats(  # noqa: PLR0913
     hass: HomeAssistant,
     service_point: str,
+    account_id: str,
     readings: list,
     *,
     is_gas: bool,
@@ -274,6 +290,7 @@ async def _import_hourly_stats(  # noqa: PLR0913
     """Import hourly AMI usage statistics."""
     stat_id, fuel, unit, unit_class, stat_name = _resolve_hourly_stat_info(
         service_point,
+        account_id,
         is_gas=is_gas,
         return_only=return_only,
     )
@@ -493,6 +510,7 @@ def _build_hourly_stat_list(
 async def _import_interval_stats_electric(
     hass: HomeAssistant,
     service_point: str,
+    account_id: str,
     reads: list,
 ) -> None:
     """Import interval stats for electric meters, split by direction.
@@ -504,6 +522,7 @@ async def _import_interval_stats_electric(
     await _import_interval_stats(
         hass,
         service_point,
+        account_id,
         reads,
         consumption_only=True,
     )
@@ -513,14 +532,16 @@ async def _import_interval_stats_electric(
         await _import_interval_stats(
             hass,
             service_point,
+            account_id,
             reads,
             return_only=True,
         )
 
 
-async def _import_interval_stats(
+async def _import_interval_stats(  # noqa: PLR0913
     hass: HomeAssistant,
     service_point: str,
+    account_id: str,
     reads: list,
     *,
     consumption_only: bool = False,
@@ -539,13 +560,15 @@ async def _import_interval_stats(
     )
     cutoff_ts = cutoff.timestamp()
 
+    prefix = f"{account_id}_{service_point}"
+    display = f"{account_id}-{service_point}"
     if return_only:
-        stat_id = f"{DOMAIN}:{service_point}_electric_interval_return_usage"
-        stat_name = f"{service_point} Electric Interval Return Usage"
+        stat_id = f"{DOMAIN}:{prefix}_electric_interval_return_usage"
+        stat_name = f"{display} Electric Interval Return Usage"
         stat_type = "return"
     else:
-        stat_id = f"{DOMAIN}:{service_point}_electric_interval_usage"
-        stat_name = f"{service_point} Electric Interval Usage"
+        stat_id = f"{DOMAIN}:{prefix}_electric_interval_usage"
+        stat_name = f"{display} Electric Interval Usage"
         stat_type = "consumption"
 
     _LOGGER.info(

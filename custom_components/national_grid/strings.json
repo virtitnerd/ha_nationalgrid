@@ -20,6 +20,12 @@
                     "username": "Username",
                     "password": "Password"
                 }
+            },
+            "reconfigure": {
+                "description": "Update which National Grid accounts to monitor.",
+                "data": {
+                    "selected_accounts": "Billing Accounts"
+                }
             }
         },
         "error": {
@@ -30,7 +36,8 @@
         },
         "abort": {
             "already_configured": "This account is already configured.",
-            "reauth_successful": "Re-authentication successful."
+            "reauth_successful": "Re-authentication successful.",
+            "reconfigure_successful": "Account selection updated successfully."
         }
     },
     "services": {
@@ -52,6 +59,12 @@
             },
             "energy_cost": {
                 "name": "Last Billing Cost"
+            },
+            "current_bill_amount": {
+                "name": "Current Bill"
+            },
+            "next_reading_date": {
+                "name": "Next Reading Date"
             }
         },
         "binary_sensor": {

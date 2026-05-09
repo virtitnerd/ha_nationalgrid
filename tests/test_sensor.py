@@ -14,6 +14,8 @@ from custom_components.national_grid.sensor import (
     SENSOR_DESCRIPTIONS,
     NationalGridAccountSensor,
     NationalGridSensor,
+    _get_cost_per_unit,
+    _get_cost_per_unit_unit,
     _get_current_bill_amount,
     _get_current_bill_attributes,
     _get_energy_cost,
@@ -253,3 +255,106 @@ def test_account_sensor_native_value() -> None:
     )
     sensor = NationalGridAccountSensor(coordinator, "acct1", next_reading_desc)
     assert sensor.native_value == date(2025, 9, 1)
+
+
+def _make_meter_data_with_fuel(fuel_type: str) -> MeterData:
+    return MeterData(
+        account_id="acct1",
+        meter={
+            "fuelType": fuel_type,
+            "servicePointNumber": "SP1",
+            "hasAmiSmartMeter": True,
+        },
+        billing_account={"billingAccountId": "acct1"},
+    )
+
+
+def test_cost_per_unit_electric() -> None:
+    """Test cost per unit for electric meter blends last 3 matched months."""
+    meter_data = _make_meter_data_with_fuel("Electric")
+    coordinator = MagicMock()
+    coordinator.get_all_usages.return_value = [
+        {"usageYearMonth": 202503, "usageType": "TOTAL_KWH", "usage": 400.0},
+        {"usageYearMonth": 202502, "usageType": "TOTAL_KWH", "usage": 500.0},
+        {"usageYearMonth": 202501, "usageType": "TOTAL_KWH", "usage": 600.0},
+        {"usageYearMonth": 202412, "usageType": "TOTAL_KWH", "usage": 700.0},
+    ]
+    coordinator.get_all_costs.return_value = [
+        {"fuelType": "ELECTRIC", "date": "2025-03-01", "month": 3, "amount": 80.0},
+        {"fuelType": "ELECTRIC", "date": "2025-02-01", "month": 2, "amount": 100.0},
+        {"fuelType": "ELECTRIC", "date": "2025-01-01", "month": 1, "amount": 120.0},
+        {"fuelType": "ELECTRIC", "date": "2024-12-01", "month": 12, "amount": 140.0},
+    ]
+    # Window = 3 most recent: Mar, Feb, Jan
+    # total_cost = 80 + 100 + 120 = 300; total_usage = 400 + 500 + 600 = 1500
+    result = _get_cost_per_unit(coordinator, meter_data)
+    assert result == round(300.0 / 1500.0, 4)
+
+
+def test_cost_per_unit_gas() -> None:
+    """Test cost per unit for gas meter uses CCF unit."""
+    meter_data = _make_meter_data_with_fuel("Gas")
+    coordinator = MagicMock()
+    coordinator.get_all_usages.return_value = [
+        {"usageYearMonth": 202501, "usageType": "THERMS", "usage": 50.0},
+    ]
+    coordinator.get_all_costs.return_value = [
+        {"fuelType": "GAS", "date": "2025-01-01", "month": 1, "amount": 75.0},
+    ]
+    result = _get_cost_per_unit(coordinator, meter_data)
+    assert result == round(75.0 / 50.0, 4)
+
+
+def test_cost_per_unit_year_boundary() -> None:
+    """Test that December (month=12) does not beat January of the following year."""
+    meter_data = _make_meter_data_with_fuel("Electric")
+    coordinator = MagicMock()
+    coordinator.get_all_usages.return_value = [
+        {"usageYearMonth": 202501, "usageType": "TOTAL_KWH", "usage": 500.0},
+        {"usageYearMonth": 202412, "usageType": "TOTAL_KWH", "usage": 700.0},
+    ]
+    coordinator.get_all_costs.return_value = [
+        {"fuelType": "ELECTRIC", "date": "2025-01-01", "month": 1, "amount": 100.0},
+        {"fuelType": "ELECTRIC", "date": "2024-12-01", "month": 12, "amount": 140.0},
+    ]
+    # Window = 2 (only 2 matched); Jan 2025 is most recent
+    result = _get_cost_per_unit(coordinator, meter_data)
+    assert result == round(240.0 / 1200.0, 4)
+
+
+def test_cost_per_unit_no_data_returns_zero() -> None:
+    """Test cost per unit returns 0.0 when no data is available."""
+    meter_data = _make_meter_data_with_fuel("Electric")
+    coordinator = MagicMock()
+    coordinator.get_all_usages.return_value = []
+    coordinator.get_all_costs.return_value = []
+    assert _get_cost_per_unit(coordinator, meter_data) == 0.0
+
+
+def test_cost_per_unit_no_matching_months_returns_zero() -> None:
+    """Test cost per unit returns 0.0 when usages and costs don't share any month."""
+    meter_data = _make_meter_data_with_fuel("Electric")
+    coordinator = MagicMock()
+    coordinator.get_all_usages.return_value = [
+        {"usageYearMonth": 202503, "usageType": "TOTAL_KWH", "usage": 400.0},
+    ]
+    coordinator.get_all_costs.return_value = [
+        {"fuelType": "ELECTRIC", "date": "2025-01-01", "month": 1, "amount": 100.0},
+    ]
+    assert _get_cost_per_unit(coordinator, meter_data) == 0.0
+
+
+def test_cost_per_unit_unit_electric() -> None:
+    """Test cost per unit label for electric meter."""
+    assert _get_cost_per_unit_unit(_make_meter_data_with_fuel("Electric")) == "$/kWh"
+
+
+def test_cost_per_unit_unit_gas() -> None:
+    """Test cost per unit label for gas meter."""
+    assert _get_cost_per_unit_unit(_make_meter_data_with_fuel("Gas")) == "$/CCF"
+
+
+def test_cost_per_unit_in_sensor_descriptions() -> None:
+    """Test that cost_per_unit appears in SENSOR_DESCRIPTIONS."""
+    keys = [d.key for d in SENSOR_DESCRIPTIONS]
+    assert "cost_per_unit" in keys

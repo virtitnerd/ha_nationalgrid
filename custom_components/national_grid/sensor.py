@@ -10,6 +10,7 @@ from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
+    SensorStateClass,
 )
 from homeassistant.const import EntityCategory
 
@@ -92,6 +93,58 @@ def _get_energy_device_class(meter_data: MeterData) -> SensorDeviceClass | None:
     return SensorDeviceClass.ENERGY
 
 
+_RATE_WINDOW = 3  # billing cycles to include in blended rate
+
+
+def _get_cost_per_unit_unit(meter_data: MeterData) -> str:
+    """Return the appropriate cost-per-unit label based on fuel type."""
+    fuel_type = meter_data.meter.get("fuelType", "").upper()
+    return "$/CCF" if fuel_type == "GAS" else "$/kWh"
+
+
+def _get_cost_per_unit(
+    coordinator: NationalGridDataUpdateCoordinator, meter_data: MeterData
+) -> float:
+    """Return blended rate (total cost ÷ total usage) over the last 3 matched months.
+
+    Returns 0.0 when no matched month pairs are available so Energy Dashboard
+    cost calculations remain functional.
+    """
+    fuel_type = meter_data.meter.get("fuelType")
+    usages = coordinator.get_all_usages(meter_data.account_id, fuel_type)
+    costs = coordinator.get_all_costs(meter_data.account_id, fuel_type)
+    if not usages or not costs:
+        return 0.0
+
+    # Build YYYYMM → cost amount lookup from the date field (month is 1-12 only).
+    cost_by_month: dict[int, float] = {}
+    for cost in costs:
+        date_str = cost.get("date", "")
+        if len(date_str) >= 7:  # noqa: PLR2004
+            yyyymm = int(date_str[:7].replace("-", ""))
+            cost_by_month[yyyymm] = cost.get("amount", 0.0)
+
+    # Collect months that have both a positive usage record and a cost record.
+    matched = sorted(
+        [
+            (u.get("usageYearMonth", 0), u.get("usage", 0.0))
+            for u in usages
+            if u.get("usageYearMonth", 0) in cost_by_month and u.get("usage", 0.0) > 0
+        ],
+        key=lambda x: x[0],
+        reverse=True,
+    )
+    if not matched:
+        return 0.0
+
+    window = matched[:_RATE_WINDOW]
+    total_cost = sum(cost_by_month[yyyymm] for yyyymm, _ in window)
+    total_usage = sum(usage for _, usage in window)
+    if total_usage == 0:
+        return 0.0
+    return round(total_cost / total_usage, 4)
+
+
 def _get_current_bill_amount(
     coordinator: NationalGridDataUpdateCoordinator, account_id: str
 ) -> float | None:
@@ -162,6 +215,14 @@ SENSOR_DESCRIPTIONS: tuple[NationalGridSensorEntityDescription, ...] = (
         value_fn=_get_energy_usage,
         unit_fn=_get_energy_unit,
         device_class_fn=_get_energy_device_class,
+    ),
+    NationalGridSensorEntityDescription(
+        key="cost_per_unit",
+        translation_key="cost_per_unit",
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=4,
+        value_fn=_get_cost_per_unit,
+        unit_fn=_get_cost_per_unit_unit,
     ),
 )
 

@@ -65,6 +65,9 @@
             },
             "next_reading_date": {
                 "name": "Next Reading Date"
+            },
+            "cost_per_unit": {
+                "name": "Cost per Unit"
             }
         },
         "binary_sensor": {

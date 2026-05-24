@@ -28,8 +28,10 @@ if TYPE_CHECKING:
         AmiEnergyUsage,
         Bill,
         BillingAccount,
+        ElectricBillRecord,
         EnergyUsage,
         EnergyUsageCost,
+        GasBillRecord,
         IntervalRead,
         Meter,
     )
@@ -61,6 +63,10 @@ class NationalGridCoordinatorData:
     meters: dict[str, MeterData] = field(default_factory=dict)
     reading_dates: dict[str, str | None] = field(default_factory=dict)
     usages: dict[str, list[EnergyUsage]] = field(default_factory=dict)
+    electric_bill_history: dict[str, list[ElectricBillRecord]] = field(
+        default_factory=dict
+    )
+    gas_bill_history: dict[str, list[GasBillRecord]] = field(default_factory=dict)
     is_first_refresh: bool = False
     # Midnight refresh: force full hourly import + clear/reimport interval stats
     is_midnight_refresh: bool = False
@@ -278,6 +284,8 @@ class NationalGridDataUpdateCoordinator(
             ami_usages=dict(prev.ami_usages),
             bills=dict(prev.bills),
             costs=dict(prev.costs),
+            electric_bill_history=dict(prev.electric_bill_history),
+            gas_bill_history=dict(prev.gas_bill_history),
             interval_reads=dict(prev.interval_reads),
             meters=dict(prev.meters),
             reading_dates=dict(prev.reading_dates),
@@ -331,6 +339,9 @@ class NationalGridDataUpdateCoordinator(
 
             # Fetch bill history.
             data.bills[account_id] = await self._fetch_bills(account_id)
+
+            # Fetch business portal bill history (utility/supplier charge breakdown).
+            await self._fetch_bill_history(data, account_id)
 
         # Fetch AMI and interval read data for AMI-capable meters.
         # In interval-only mode: skips slow GraphQL AMI fetch, does interval reads only.
@@ -434,6 +445,70 @@ class NationalGridDataUpdateCoordinator(
             return []
         else:
             return bills
+
+    async def _fetch_bill_history(
+        self,
+        data: NationalGridCoordinatorData,
+        account_id: str,
+    ) -> None:
+        """Fetch per-period bill history from the business portal for an account.
+
+        Calls get_electric_bill_history / get_gas_bill_history based on the
+        fuelTypes reported by the billing account. Failures are logged as
+        warnings and the history dict for that fuel type is left unchanged
+        (preserving stale data from the previous refresh).
+        """
+        billing_account = data.accounts.get(account_id)
+        if not billing_account:
+            return
+        customer_number = billing_account.get("customerNumber")
+        if customer_number is None:
+            _LOGGER.warning(
+                "Account %s has no customerNumber — skipping bill history fetch",
+                account_id,
+            )
+            return
+        customer_number = str(customer_number)
+        fuel_types = [
+            str(ft.get("type", "")).upper()
+            for ft in billing_account.get("fuelTypes", [])
+        ]
+
+        if "ELECTRIC" in fuel_types:
+            try:
+                data.electric_bill_history[
+                    account_id
+                ] = await self.api.get_electric_bill_history(
+                    account_id, customer_number
+                )
+                _LOGGER.debug(
+                    "Fetched %s electric bill history records for account %s",
+                    len(data.electric_bill_history[account_id]),
+                    account_id,
+                )
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.warning(
+                    "Failed to fetch electric bill history for account %s: %s",
+                    account_id,
+                    err,
+                )
+
+        if "GAS" in fuel_types:
+            try:
+                data.gas_bill_history[account_id] = await self.api.get_gas_bill_history(
+                    account_id, customer_number
+                )
+                _LOGGER.debug(
+                    "Fetched %s gas bill history records for account %s",
+                    len(data.gas_bill_history[account_id]),
+                    account_id,
+                )
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.warning(
+                    "Failed to fetch gas bill history for account %s: %s",
+                    account_id,
+                    err,
+                )
 
     async def _fetch_ami_data(  # noqa: PLR0913
         self,
@@ -810,6 +885,22 @@ class NationalGridDataUpdateCoordinator(
         if not readings:
             return None
         return max(readings, key=lambda r: r.get("date", ""))
+
+    def get_latest_electric_bill_record(
+        self, account_id: str
+    ) -> ElectricBillRecord | None:
+        """Return the most recent electric bill history record for an account."""
+        if self.data is None:
+            return None
+        records = self.data.electric_bill_history.get(account_id, [])
+        return records[0] if records else None
+
+    def get_latest_gas_bill_record(self, account_id: str) -> GasBillRecord | None:
+        """Return the most recent gas bill history record for an account."""
+        if self.data is None:
+            return None
+        records = self.data.gas_bill_history.get(account_id, [])
+        return records[0] if records else None
 
     def reset_to_first_refresh(self) -> None:
         """Reset the coordinator to perform a full historical data import.

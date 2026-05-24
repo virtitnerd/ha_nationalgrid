@@ -1,2 +1,3 @@
 pytest-homeassistant-custom-component
 pytest-cov
+py-nationalgrid==0.6.3

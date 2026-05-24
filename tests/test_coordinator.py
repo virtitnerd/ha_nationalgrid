@@ -33,6 +33,8 @@ from .conftest import (
     _mock_billing_account,
     _mock_bills,
     _mock_costs,
+    _mock_electric_bill_history,
+    _mock_gas_bill_history,
     _mock_usages,
 )
 
@@ -75,6 +77,10 @@ def _make_api() -> AsyncMock:
     api.get_linked_accounts = AsyncMock(return_value=_mock_account_links())
     api.get_interval_reads = AsyncMock(return_value=[])
     api.get_bills = AsyncMock(return_value=_mock_bills())
+    api.get_electric_bill_history = AsyncMock(
+        return_value=_mock_electric_bill_history()
+    )
+    api.get_gas_bill_history = AsyncMock(return_value=_mock_gas_bill_history())
     return api
 
 
@@ -1079,3 +1085,177 @@ async def test_seed_from_previous_preserves_bills(hass: HomeAssistant) -> None:
     data2 = await coordinator._async_update_data()
 
     assert MOCK_ACCOUNT_ID in data2.bills
+
+
+# ---------------------------------------------------------------------------
+# Bill history (_fetch_bill_history / get_latest_*_bill_record) tests
+# ---------------------------------------------------------------------------
+
+
+async def test_fetch_bill_history_electric(hass: HomeAssistant) -> None:
+    """Test electric bill history is fetched and stored keyed by account_id."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+
+    coordinator.data = await coordinator._async_update_data()
+
+    records = coordinator.data.electric_bill_history.get(MOCK_ACCOUNT_ID, [])
+    assert len(records) == 2
+    assert records[0]["utilityCharges"] == 98.40
+    assert records[0]["supplierCharges"] == 47.10
+    assert records[0]["avgDailyUsage"] == 16.77
+
+
+async def test_fetch_bill_history_gas(hass: HomeAssistant) -> None:
+    """Test gas bill history is fetched and stored keyed by account_id."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+
+    coordinator.data = await coordinator._async_update_data()
+
+    records = coordinator.data.gas_bill_history.get(MOCK_ACCOUNT_ID, [])
+    assert len(records) == 1
+    assert records[0]["utilityCharges"] == 28.80
+    assert records[0]["avgDailyUsage"] == 1.03
+
+
+async def test_fetch_bill_history_electric_api_failure(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test electric bill history failure is logged as WARNING and does not raise."""
+    api = _make_api()
+    api.get_electric_bill_history = AsyncMock(
+        side_effect=Exception("business portal unavailable")
+    )
+    coordinator = _make_coordinator(hass, api)
+
+    with caplog.at_level(logging.WARNING):
+        coordinator.data = await coordinator._async_update_data()
+
+    assert "Failed to fetch electric bill history" in caplog.text
+    assert coordinator.data.electric_bill_history.get(MOCK_ACCOUNT_ID) is None
+
+
+async def test_fetch_bill_history_gas_api_failure(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test gas bill history failure is logged as WARNING and does not raise."""
+    api = _make_api()
+    api.get_gas_bill_history = AsyncMock(
+        side_effect=Exception("business portal unavailable")
+    )
+    coordinator = _make_coordinator(hass, api)
+
+    with caplog.at_level(logging.WARNING):
+        coordinator.data = await coordinator._async_update_data()
+
+    assert "Failed to fetch gas bill history" in caplog.text
+    assert coordinator.data.gas_bill_history.get(MOCK_ACCOUNT_ID) is None
+
+
+async def test_get_latest_electric_bill_record(hass: HomeAssistant) -> None:
+    """Test get_latest_electric_bill_record returns the first (most recent) record."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = await coordinator._async_update_data()
+
+    record = coordinator.get_latest_electric_bill_record(MOCK_ACCOUNT_ID)
+    assert record is not None
+    assert record["utilityCharges"] == 98.40
+
+
+async def test_get_latest_electric_bill_record_empty(hass: HomeAssistant) -> None:
+    """Test get_latest_electric_bill_record returns None when no history."""
+    api = _make_api()
+    api.get_electric_bill_history = AsyncMock(return_value=[])
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = await coordinator._async_update_data()
+
+    assert coordinator.get_latest_electric_bill_record(MOCK_ACCOUNT_ID) is None
+
+
+async def test_get_latest_gas_bill_record(hass: HomeAssistant) -> None:
+    """Test get_latest_gas_bill_record returns the first (most recent) record."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = await coordinator._async_update_data()
+
+    record = coordinator.get_latest_gas_bill_record(MOCK_ACCOUNT_ID)
+    assert record is not None
+    assert record["utilityCharges"] == 28.80
+
+
+async def test_get_latest_electric_bill_record_none_data(hass: HomeAssistant) -> None:
+    """Test get_latest_electric_bill_record returns None when data is None."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = None
+    assert coordinator.get_latest_electric_bill_record(MOCK_ACCOUNT_ID) is None
+
+
+async def test_get_latest_gas_bill_record_none_data(hass: HomeAssistant) -> None:
+    """Test get_latest_gas_bill_record returns None when coordinator has no data."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = None
+    assert coordinator.get_latest_gas_bill_record(MOCK_ACCOUNT_ID) is None
+
+
+async def test_fetch_bill_history_skipped_without_customer_number(
+    hass: HomeAssistant,
+) -> None:
+    """Test bill history is not fetched when customerNumber is absent."""
+    api = _make_api()
+    billing = _mock_billing_account()
+    del billing["customerNumber"]
+    api.get_billing_account = AsyncMock(return_value=billing)
+    coordinator = _make_coordinator(hass, api)
+
+    coordinator.data = await coordinator._async_update_data()
+
+    api.get_electric_bill_history.assert_not_called()
+    api.get_gas_bill_history.assert_not_called()
+
+
+async def test_fetch_bill_history_skipped_in_interval_only_mode(
+    hass: HomeAssistant,
+) -> None:
+    """Test bill history is not fetched in interval-only mode."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator._is_first_refresh = False
+    await coordinator.async_refresh_interval_only()
+
+    api.get_electric_bill_history.assert_not_called()
+    api.get_gas_bill_history.assert_not_called()
+
+
+async def test_fetch_bill_history_skipped_when_account_not_loaded(
+    hass: HomeAssistant,
+) -> None:
+    """Test _fetch_bill_history is a no-op when account is not in data.accounts."""
+    from custom_components.national_grid.coordinator import NationalGridCoordinatorData
+
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = NationalGridCoordinatorData(accounts={})
+
+    await coordinator._fetch_bill_history(coordinator.data, "nonexistent_account")
+
+    api.get_electric_bill_history.assert_not_called()
+    api.get_gas_bill_history.assert_not_called()
+
+
+async def test_seed_from_previous_preserves_bill_history(hass: HomeAssistant) -> None:
+    """Test bill history is preserved across incremental refreshes when API errors."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+
+    coordinator.data = await coordinator._async_update_data()
+    assert MOCK_ACCOUNT_ID in coordinator.data.electric_bill_history
+
+    api.get_electric_bill_history = AsyncMock(side_effect=Exception("portal down"))
+    coordinator._is_first_refresh = False
+    data2 = await coordinator._async_update_data()
+
+    assert MOCK_ACCOUNT_ID in data2.electric_bill_history

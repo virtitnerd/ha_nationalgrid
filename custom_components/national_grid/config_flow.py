@@ -57,10 +57,7 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 _errors["base"] = "unknown"
             else:
                 if not self._accounts:
-                    _LOGGER.error(
-                        "Login succeeded but no accounts returned for %s",
-                        self._username,
-                    )
+                    _LOGGER.error("Login succeeded but no accounts returned")
                     return self.async_abort(reason="no_accounts_found")
                 await self.async_set_unique_id(slugify(self._username))
                 self._abort_if_unique_id_configured()
@@ -144,8 +141,7 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 if not self._accounts:
                     _LOGGER.error(
-                        "Reconfigure: login succeeded but no accounts returned for %s",
-                        reconfigure_entry.data[CONF_USERNAME],
+                        "Reconfigure: login succeeded but no accounts returned"
                     )
                     return self.async_abort(reason="no_accounts_found")
 

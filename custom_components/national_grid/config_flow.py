@@ -61,12 +61,11 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                         "Login succeeded but no accounts returned for %s",
                         self._username,
                     )
-                    _errors["base"] = "no_accounts_found"
-                else:
-                    await self.async_set_unique_id(slugify(self._username))
-                    self._abort_if_unique_id_configured()
+                    return self.async_abort(reason="no_accounts_found")
+                await self.async_set_unique_id(slugify(self._username))
+                self._abort_if_unique_id_configured()
 
-                    return await self.async_step_select_accounts()
+                return await self.async_step_select_accounts()
 
         return self.async_show_form(
             step_id="user",
@@ -148,7 +147,7 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                         "Reconfigure: login succeeded but no accounts returned for %s",
                         reconfigure_entry.data[CONF_USERNAME],
                     )
-                    _errors["base"] = "no_accounts_found"
+                    return self.async_abort(reason="no_accounts_found")
 
         current_selection = reconfigure_entry.data.get(CONF_SELECTED_ACCOUNTS, [])
 

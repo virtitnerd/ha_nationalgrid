@@ -32,11 +32,11 @@
             "auth": "Invalid username or password.",
             "connection": "Unable to connect to National Grid.",
             "unknown": "An unexpected error occurred.",
-            "no_accounts_selected": "Please select at least one account.",
-            "no_accounts_found": "Login succeeded but no National Grid accounts were found on this profile."
+            "no_accounts_selected": "Please select at least one account."
         },
         "abort": {
             "already_configured": "This account is already configured.",
+            "no_accounts_found": "Login succeeded but no National Grid accounts were found on this profile.",
             "reauth_successful": "Re-authentication successful.",
             "reconfigure_successful": "Account selection updated successfully."
         }

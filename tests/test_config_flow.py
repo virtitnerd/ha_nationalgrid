@@ -529,7 +529,7 @@ async def test_reconfigure_unknown_error(hass: HomeAssistant) -> None:
 
 
 async def test_user_step_no_accounts_found(hass: HomeAssistant) -> None:
-    """Test user step shows error when login succeeds but no accounts are returned."""
+    """Test user step aborts when login succeeds but no accounts are returned."""
     with patch(PATCH_CLIENT) as mock_cls:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
@@ -545,13 +545,12 @@ async def test_user_step_no_accounts_found(hass: HomeAssistant) -> None:
             },
         )
 
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "user"
-    assert result["errors"]["base"] == "no_accounts_found"
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "no_accounts_found"
 
 
 async def test_reconfigure_no_accounts_found(hass: HomeAssistant) -> None:
-    """Test reconfigure shows error when login succeeds but no accounts are returned."""
+    """Test reconfigure aborts when login succeeds but no accounts are returned."""
     entry = _make_reconfigure_entry(hass)
 
     with patch(PATCH_CLIENT) as mock_cls:
@@ -562,8 +561,8 @@ async def test_reconfigure_no_accounts_found(hass: HomeAssistant) -> None:
 
         result = await entry.start_reconfigure_flow(hass)
 
-    assert result["type"] is FlowResultType.FORM
-    assert result["errors"]["base"] == "no_accounts_found"
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "no_accounts_found"
 
 
 async def test_already_configured(hass: HomeAssistant) -> None:

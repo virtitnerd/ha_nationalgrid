@@ -26,6 +26,8 @@ def _mock_billing_account(account_id: str = MOCK_ACCOUNT_ID) -> dict:
         "billingAccountId": account_id,
         "region": "KEDNY",
         "premiseNumber": "PREM001",
+        "customerNumber": 987654321,
+        "fuelTypes": [{"type": "Electric"}, {"type": "Gas"}],
         "meter": {
             "nodes": [
                 {
@@ -128,6 +130,54 @@ def _mock_bills(account_id: str = MOCK_ACCOUNT_ID) -> list[dict]:
             "status": "PAID",
             "currentChargesAmount": 132.00,
             "totalDueAmount": 132.00,
+        },
+    ]
+
+
+def _mock_electric_bill_history() -> list[dict]:
+    """Return mock electric bill history records (newest first)."""
+    return [
+        {
+            "readDate": "2025-01-28",
+            "readFromDate": "2024-12-28",
+            "readDays": 31,
+            "readType": "Actual",
+            "totalKwh": 520.0,
+            "utilityCharges": 98.40,
+            "supplierCharges": 47.10,
+            "latePayment": 0.0,
+            "totalCharges": 145.50,
+            "avgDailyUsage": 16.77,
+        },
+        {
+            "readDate": "2024-12-28",
+            "readFromDate": "2024-11-28",
+            "readDays": 30,
+            "readType": "Actual",
+            "totalKwh": 490.0,
+            "utilityCharges": 92.00,
+            "supplierCharges": 44.00,
+            "latePayment": 0.0,
+            "totalCharges": 136.00,
+            "avgDailyUsage": 16.33,
+        },
+    ]
+
+
+def _mock_gas_bill_history() -> list[dict]:
+    """Return mock gas bill history records (newest first)."""
+    return [
+        {
+            "readDate": "2025-01-28",
+            "readFromDate": "2024-12-28",
+            "readDays": 31,
+            "readType": "Actual",
+            "totalTherms": 32.0,
+            "utilityCharges": 28.80,
+            "supplierCharges": 16.20,
+            "latePayment": 0.0,
+            "totalCharges": 45.00,
+            "avgDailyUsage": 1.03,
         },
     ]
 

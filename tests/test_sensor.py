@@ -462,6 +462,22 @@ def test_get_supplier_charges_none_when_no_record() -> None:
     assert _get_supplier_charges(coordinator, meter_data) is None
 
 
+def test_get_supplier_charges_gas() -> None:
+    """Test _get_supplier_charges returns supplierCharges from gas record."""
+    meter_data = _make_meter_data("Gas")
+    coordinator = MagicMock()
+    coordinator.get_latest_gas_bill_record.return_value = _make_gas_bill_record()
+    assert _get_supplier_charges(coordinator, meter_data) == 16.20
+
+
+def test_get_supplier_charges_gas_none() -> None:
+    """Test _get_supplier_charges returns None when no gas bill history record."""
+    meter_data = _make_meter_data("Gas")
+    coordinator = MagicMock()
+    coordinator.get_latest_gas_bill_record.return_value = None
+    assert _get_supplier_charges(coordinator, meter_data) is None
+
+
 def test_get_avg_daily_usage_electric() -> None:
     """Test _get_avg_daily_usage returns avgDailyUsage from electric record."""
     meter_data = _make_meter_data("Electric")

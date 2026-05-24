@@ -1104,6 +1104,8 @@ async def test_fetch_bill_history_electric(hass: HomeAssistant) -> None:
     assert records[0]["utilityCharges"] == 98.40
     assert records[0]["supplierCharges"] == 47.10
     assert records[0]["avgDailyUsage"] == 16.77
+    # customerNumber must be coerced to str before the API call (model returns int)
+    api.get_electric_bill_history.assert_called_once_with(MOCK_ACCOUNT_ID, "987654321")
 
 
 async def test_fetch_bill_history_gas(hass: HomeAssistant) -> None:
@@ -1117,6 +1119,8 @@ async def test_fetch_bill_history_gas(hass: HomeAssistant) -> None:
     assert len(records) == 1
     assert records[0]["utilityCharges"] == 28.80
     assert records[0]["avgDailyUsage"] == 1.03
+    # customerNumber must be coerced to str before the API call (model returns int)
+    api.get_gas_bill_history.assert_called_once_with(MOCK_ACCOUNT_ID, "987654321")
 
 
 async def test_fetch_bill_history_electric_api_failure(

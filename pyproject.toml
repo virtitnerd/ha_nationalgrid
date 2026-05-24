@@ -5,5 +5,5 @@ addopts = "--cov=custom_components/national_grid --cov-report=term-missing --cov
 
 [dependency-groups]
 dev = [
-    "ruff>=0.15.12",
+    "ruff>=0.15.14",
 ]

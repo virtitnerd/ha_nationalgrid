@@ -528,6 +528,43 @@ async def test_reconfigure_unknown_error(hass: HomeAssistant) -> None:
     assert result["errors"]["base"] == "unknown"
 
 
+async def test_user_step_no_accounts_found(hass: HomeAssistant) -> None:
+    """Test user step aborts when login succeeds but no accounts are returned."""
+    with patch(PATCH_CLIENT) as mock_cls:
+        client = mock_cls.return_value
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get_linked_accounts = AsyncMock(return_value=[])
+
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={
+                CONF_USERNAME: MOCK_USERNAME,
+                CONF_PASSWORD: MOCK_PASSWORD,
+            },
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "no_accounts_found"
+
+
+async def test_reconfigure_no_accounts_found(hass: HomeAssistant) -> None:
+    """Test reconfigure aborts when login succeeds but no accounts are returned."""
+    entry = _make_reconfigure_entry(hass)
+
+    with patch(PATCH_CLIENT) as mock_cls:
+        client = mock_cls.return_value
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get_linked_accounts = AsyncMock(return_value=[])
+
+        result = await entry.start_reconfigure_flow(hass)
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "no_accounts_found"
+
+
 async def test_already_configured(hass: HomeAssistant) -> None:
     """Test that duplicate unique_id aborts."""
     entry = MockConfigEntry(

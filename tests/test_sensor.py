@@ -14,15 +14,19 @@ from custom_components.national_grid.sensor import (
     SENSOR_DESCRIPTIONS,
     NationalGridAccountSensor,
     NationalGridSensor,
+    _get_avg_daily_usage,
+    _get_bill_history_record,
     _get_cost_per_unit,
     _get_cost_per_unit_unit,
     _get_current_bill_amount,
     _get_current_bill_attributes,
-    _get_energy_cost,
     _get_energy_device_class,
     _get_energy_unit,
     _get_energy_usage,
     _get_next_reading_date,
+    _get_supplier_charges,
+    _get_total_charges,
+    _get_utility_charges,
 )
 
 
@@ -78,21 +82,20 @@ def test_energy_usage_none() -> None:
 
 
 def test_energy_cost() -> None:
-    """Test cost value extraction."""
-    meter_data = _make_meter_data()
+    """Test energy_cost sensor uses totalCharges from bill history."""
+    meter_data = _make_meter_data("Electric")
     coordinator = MagicMock()
-    coordinator.get_latest_cost.return_value = {"amount": 120.50}
-    result = _get_energy_cost(coordinator, meter_data)
-    assert result == 120.50
+    electric_rec = _make_electric_bill_record()
+    coordinator.get_latest_electric_bill_record.return_value = electric_rec
+    assert _get_total_charges(coordinator, meter_data) == 145.50
 
 
 def test_energy_cost_none() -> None:
-    """Test cost returns None when no data."""
-    meter_data = _make_meter_data()
+    """Test energy_cost sensor returns None when no bill history record."""
+    meter_data = _make_meter_data("Electric")
     coordinator = MagicMock()
-    coordinator.get_latest_cost.return_value = None
-    result = _get_energy_cost(coordinator, meter_data)
-    assert result is None
+    coordinator.get_latest_electric_bill_record.return_value = None
+    assert _get_total_charges(coordinator, meter_data) is None
 
 
 def test_gas_meter_units() -> None:
@@ -358,3 +361,184 @@ def test_cost_per_unit_in_sensor_descriptions() -> None:
     """Test that cost_per_unit appears in SENSOR_DESCRIPTIONS."""
     keys = [d.key for d in SENSOR_DESCRIPTIONS]
     assert "cost_per_unit" in keys
+
+
+# ---------------------------------------------------------------------------
+# Bill history sensor tests
+# ---------------------------------------------------------------------------
+
+
+def _make_electric_bill_record() -> dict:
+    return {
+        "readDate": "2025-01-28",
+        "readFromDate": "2024-12-28",
+        "totalKwh": 520.0,
+        "utilityCharges": 98.40,
+        "supplierCharges": 47.10,
+        "totalCharges": 145.50,
+        "avgDailyUsage": 16.77,
+    }
+
+
+def _make_gas_bill_record() -> dict:
+    return {
+        "readDate": "2025-01-28",
+        "readFromDate": "2024-12-28",
+        "totalTherms": 32.0,
+        "utilityCharges": 28.80,
+        "supplierCharges": 16.20,
+        "totalCharges": 45.00,
+        "avgDailyUsage": 1.03,
+    }
+
+
+def test_get_bill_history_record_electric() -> None:
+    """Test _get_bill_history_record returns electric record for electric meter."""
+    meter_data = _make_meter_data("Electric")
+    coordinator = MagicMock()
+    electric_rec = _make_electric_bill_record()
+    coordinator.get_latest_electric_bill_record.return_value = electric_rec
+    result = _get_bill_history_record(coordinator, meter_data)
+    assert result is not None
+    assert result["utilityCharges"] == 98.40
+
+
+def test_get_bill_history_record_gas() -> None:
+    """Test _get_bill_history_record returns gas record for gas meter."""
+    meter_data = _make_meter_data("Gas")
+    coordinator = MagicMock()
+    coordinator.get_latest_gas_bill_record.return_value = _make_gas_bill_record()
+    result = _get_bill_history_record(coordinator, meter_data)
+    assert result is not None
+    assert result["utilityCharges"] == 28.80
+
+
+def test_get_bill_history_record_unknown_fuel() -> None:
+    """Test _get_bill_history_record returns None for unknown fuel type."""
+    meter_data = _make_meter_data("Solar")
+    coordinator = MagicMock()
+    assert _get_bill_history_record(coordinator, meter_data) is None
+
+
+def test_get_utility_charges_electric() -> None:
+    """Test _get_utility_charges returns utilityCharges from electric record."""
+    meter_data = _make_meter_data("Electric")
+    coordinator = MagicMock()
+    electric_rec = _make_electric_bill_record()
+    coordinator.get_latest_electric_bill_record.return_value = electric_rec
+    assert _get_utility_charges(coordinator, meter_data) == 98.40
+
+
+def test_get_utility_charges_gas() -> None:
+    """Test _get_utility_charges returns utilityCharges from gas record."""
+    meter_data = _make_meter_data("Gas")
+    coordinator = MagicMock()
+    coordinator.get_latest_gas_bill_record.return_value = _make_gas_bill_record()
+    assert _get_utility_charges(coordinator, meter_data) == 28.80
+
+
+def test_get_utility_charges_none_when_no_record() -> None:
+    """Test _get_utility_charges returns None when no bill history record available."""
+    meter_data = _make_meter_data("Electric")
+    coordinator = MagicMock()
+    coordinator.get_latest_electric_bill_record.return_value = None
+    assert _get_utility_charges(coordinator, meter_data) is None
+
+
+def test_get_supplier_charges_electric() -> None:
+    """Test _get_supplier_charges returns supplierCharges from electric record."""
+    meter_data = _make_meter_data("Electric")
+    coordinator = MagicMock()
+    electric_rec = _make_electric_bill_record()
+    coordinator.get_latest_electric_bill_record.return_value = electric_rec
+    assert _get_supplier_charges(coordinator, meter_data) == 47.10
+
+
+def test_get_supplier_charges_none_when_no_record() -> None:
+    """Test _get_supplier_charges returns None when no bill history record available."""
+    meter_data = _make_meter_data("Electric")
+    coordinator = MagicMock()
+    coordinator.get_latest_electric_bill_record.return_value = None
+    assert _get_supplier_charges(coordinator, meter_data) is None
+
+
+def test_get_supplier_charges_gas() -> None:
+    """Test _get_supplier_charges returns supplierCharges from gas record."""
+    meter_data = _make_meter_data("Gas")
+    coordinator = MagicMock()
+    coordinator.get_latest_gas_bill_record.return_value = _make_gas_bill_record()
+    assert _get_supplier_charges(coordinator, meter_data) == 16.20
+
+
+def test_get_supplier_charges_gas_none() -> None:
+    """Test _get_supplier_charges returns None when no gas bill history record."""
+    meter_data = _make_meter_data("Gas")
+    coordinator = MagicMock()
+    coordinator.get_latest_gas_bill_record.return_value = None
+    assert _get_supplier_charges(coordinator, meter_data) is None
+
+
+def test_get_avg_daily_usage_electric() -> None:
+    """Test _get_avg_daily_usage returns avgDailyUsage from electric record."""
+    meter_data = _make_meter_data("Electric")
+    coordinator = MagicMock()
+    electric_rec = _make_electric_bill_record()
+    coordinator.get_latest_electric_bill_record.return_value = electric_rec
+    assert _get_avg_daily_usage(coordinator, meter_data) == 16.77
+
+
+def test_get_avg_daily_usage_gas() -> None:
+    """Test _get_avg_daily_usage returns avgDailyUsage from gas record."""
+    meter_data = _make_meter_data("Gas")
+    coordinator = MagicMock()
+    coordinator.get_latest_gas_bill_record.return_value = _make_gas_bill_record()
+    assert _get_avg_daily_usage(coordinator, meter_data) == 1.03
+
+
+def test_get_avg_daily_usage_none_when_no_record() -> None:
+    """Test _get_avg_daily_usage returns None when no bill history record available."""
+    meter_data = _make_meter_data("Electric")
+    coordinator = MagicMock()
+    coordinator.get_latest_electric_bill_record.return_value = None
+    assert _get_avg_daily_usage(coordinator, meter_data) is None
+
+
+def test_avg_daily_usage_uses_energy_unit_fn() -> None:
+    """Test last_bill_avg_daily_usage sensor uses _get_energy_unit for its unit_fn."""
+    desc = next(d for d in SENSOR_DESCRIPTIONS if d.key == "last_bill_avg_daily_usage")
+    assert desc.unit_fn is not None
+    assert desc.unit_fn(_make_meter_data("Electric")) == UNIT_KWH
+    assert desc.unit_fn(_make_meter_data("Gas")) == UNIT_CCF
+
+
+def test_get_total_charges_electric() -> None:
+    """Test _get_total_charges returns totalCharges from electric record."""
+    meter_data = _make_meter_data("Electric")
+    coordinator = MagicMock()
+    electric_rec = _make_electric_bill_record()
+    coordinator.get_latest_electric_bill_record.return_value = electric_rec
+    assert _get_total_charges(coordinator, meter_data) == 145.50
+
+
+def test_get_total_charges_gas() -> None:
+    """Test _get_total_charges returns totalCharges from gas record."""
+    meter_data = _make_meter_data("Gas")
+    coordinator = MagicMock()
+    coordinator.get_latest_gas_bill_record.return_value = _make_gas_bill_record()
+    assert _get_total_charges(coordinator, meter_data) == 45.00
+
+
+def test_get_total_charges_none_when_no_record() -> None:
+    """Test _get_total_charges returns None when no bill history record available."""
+    meter_data = _make_meter_data("Electric")
+    coordinator = MagicMock()
+    coordinator.get_latest_electric_bill_record.return_value = None
+    assert _get_total_charges(coordinator, meter_data) is None
+
+
+def test_bill_history_sensors_in_descriptions() -> None:
+    """Test all bill history sensors appear in SENSOR_DESCRIPTIONS."""
+    keys = [d.key for d in SENSOR_DESCRIPTIONS]
+    assert "last_bill_utility_charges" in keys
+    assert "last_bill_supplier_charges" in keys
+    assert "last_bill_avg_daily_usage" in keys

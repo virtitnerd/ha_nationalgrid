@@ -23,6 +23,7 @@ if TYPE_CHECKING:  # pragma: no cover
 
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
+    from py_nationalgrid.models import ElectricBillRecord, GasBillRecord
 
     from .coordinator import MeterData, NationalGridDataUpdateCoordinator
     from .data import NationalGridConfigEntry
@@ -62,17 +63,6 @@ def _get_energy_usage(
     )
     if usage:
         return usage.get("usage")
-    return None
-
-
-def _get_energy_cost(
-    coordinator: NationalGridDataUpdateCoordinator, meter_data: MeterData
-) -> float | None:
-    """Get the latest energy cost for a meter."""
-    fuel_type = meter_data.meter.get("fuelType")
-    cost = coordinator.get_latest_cost(meter_data.account_id, fuel_type)
-    if cost:
-        return cost.get("amount")
     return None
 
 
@@ -144,6 +134,51 @@ def _get_cost_per_unit(
     return round(total_cost / total_usage, 4)
 
 
+def _get_bill_history_record(
+    coordinator: NationalGridDataUpdateCoordinator, meter_data: MeterData
+) -> ElectricBillRecord | GasBillRecord | None:
+    """Return the most recent bill history record for the meter's fuel type."""
+    fuel = meter_data.meter.get("fuelType", "").lower()
+    account_id = meter_data.account_id
+    if fuel == "electric":
+        return coordinator.get_latest_electric_bill_record(account_id)
+    if fuel == "gas":
+        return coordinator.get_latest_gas_bill_record(account_id)
+    return None
+
+
+def _get_utility_charges(
+    coordinator: NationalGridDataUpdateCoordinator, meter_data: MeterData
+) -> float | None:
+    """Return the utility charge component from the most recent bill period."""
+    rec = _get_bill_history_record(coordinator, meter_data)
+    return rec.get("utilityCharges") if rec else None
+
+
+def _get_supplier_charges(
+    coordinator: NationalGridDataUpdateCoordinator, meter_data: MeterData
+) -> float | None:
+    """Return the supplier charge component from the most recent bill period."""
+    rec = _get_bill_history_record(coordinator, meter_data)
+    return rec.get("supplierCharges") if rec else None
+
+
+def _get_avg_daily_usage(
+    coordinator: NationalGridDataUpdateCoordinator, meter_data: MeterData
+) -> float | None:
+    """Return average daily usage from the most recent bill period."""
+    rec = _get_bill_history_record(coordinator, meter_data)
+    return rec.get("avgDailyUsage") if rec else None
+
+
+def _get_total_charges(
+    coordinator: NationalGridDataUpdateCoordinator, meter_data: MeterData
+) -> float | None:
+    """Return total charges from the most recent bill period."""
+    rec = _get_bill_history_record(coordinator, meter_data)
+    return rec.get("totalCharges") if rec else None
+
+
 def _get_current_bill_amount(
     coordinator: NationalGridDataUpdateCoordinator, account_id: str
 ) -> float | None:
@@ -206,7 +241,7 @@ SENSOR_DESCRIPTIONS: tuple[NationalGridSensorEntityDescription, ...] = (
         translation_key="energy_cost",
         native_unit_of_measurement="USD",
         device_class=SensorDeviceClass.MONETARY,
-        value_fn=_get_energy_cost,
+        value_fn=_get_total_charges,
     ),
     NationalGridSensorEntityDescription(
         key="energy_usage",
@@ -222,6 +257,30 @@ SENSOR_DESCRIPTIONS: tuple[NationalGridSensorEntityDescription, ...] = (
         suggested_display_precision=4,
         value_fn=_get_cost_per_unit,
         unit_fn=_get_cost_per_unit_unit,
+    ),
+    NationalGridSensorEntityDescription(
+        key="last_bill_utility_charges",
+        translation_key="last_bill_utility_charges",
+        native_unit_of_measurement="USD",
+        device_class=SensorDeviceClass.MONETARY,
+        value_fn=_get_utility_charges,
+        available_fn=lambda _: True,
+    ),
+    NationalGridSensorEntityDescription(
+        key="last_bill_supplier_charges",
+        translation_key="last_bill_supplier_charges",
+        native_unit_of_measurement="USD",
+        device_class=SensorDeviceClass.MONETARY,
+        value_fn=_get_supplier_charges,
+        available_fn=lambda _: True,
+    ),
+    NationalGridSensorEntityDescription(
+        key="last_bill_avg_daily_usage",
+        translation_key="last_bill_avg_daily_usage",
+        value_fn=_get_avg_daily_usage,
+        unit_fn=_get_energy_unit,
+        device_class_fn=_get_energy_device_class,
+        available_fn=lambda _: True,
     ),
 )
 

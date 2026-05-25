@@ -99,5 +99,9 @@ version-resolver:
 template: |
   $CHANGES
 
+  ---
+
+  [![Downloads for this release](https://img.shields.io/github/downloads/virtitnerd/ha_nationalgrid/$RESOLVED_VERSION/total)](https://github.com/virtitnerd/ha_nationalgrid/releases/$RESOLVED_VERSION)
+
   ## Links
   - [Submit bugs or feature requests](https://github.com/virtitnerd/ha_nationalgrid/issues)

@@ -97,11 +97,6 @@ version-resolver:
   default: patch
 
 template: |
+  [![Downloads for this release](https://img.shields.io/github/downloads/virtitnerd/ha_nationalgrid/$RESOLVED_VERSION/total.svg)](https://github.com/virtitnerd/ha_nationalgrid/releases/$RESOLVED_VERSION)
+
   $CHANGES
-
-  ---
-
-  [![Downloads for this release](https://img.shields.io/github/downloads/virtitnerd/ha_nationalgrid/$RESOLVED_VERSION/total)](https://github.com/virtitnerd/ha_nationalgrid/releases/$RESOLVED_VERSION)
-
-  ## Links
-  - [Submit bugs or feature requests](https://github.com/virtitnerd/ha_nationalgrid/issues)

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from custom_components.national_grid.coordinator import MeterData
-from custom_components.national_grid.entity import (
+from custom_components.national_grid_us.coordinator import MeterData
+from custom_components.national_grid_us.entity import (
     NationalGridAccountEntity,
     NationalGridEntity,
 )
@@ -40,7 +40,7 @@ def test_entity_device_info_with_meter_data() -> None:
     entity = NationalGridEntity(coordinator, "SP1")
     device_info = entity._attr_device_info
     assert device_info is not None
-    assert ("national_grid", "SP1") in device_info["identifiers"]
+    assert ("national_grid_us", "SP1") in device_info["identifiers"]
     assert device_info["serial_number"] == "MTR001"
     assert device_info["name"] == "Electric Meter acct1-SP1"
 
@@ -51,7 +51,7 @@ def test_entity_device_info_without_meter_data() -> None:
     entity = NationalGridEntity(coordinator, "SP1")
     device_info = entity._attr_device_info
     assert device_info is not None
-    assert ("national_grid", "SP1") in device_info["identifiers"]
+    assert ("national_grid_us", "SP1") in device_info["identifiers"]
     assert device_info["serial_number"] == "SP1"
     assert device_info["name"] == "Meter SP1"
 
@@ -128,7 +128,7 @@ def test_entity_device_info_via_device() -> None:
     coordinator = _make_coordinator(meter_data)
     entity = NationalGridEntity(coordinator, "SP1")
     device_info = entity._attr_device_info
-    assert device_info.get("via_device") == ("national_grid", "acct1")
+    assert device_info.get("via_device") == ("national_grid_us", "acct1")
 
 
 def test_entity_device_info_via_device_fallback() -> None:
@@ -147,7 +147,7 @@ def test_account_entity_device_info() -> None:
     entity = NationalGridAccountEntity(coordinator, "acct1")
     device_info = entity._attr_device_info
     assert device_info is not None
-    assert ("national_grid", "acct1") in device_info["identifiers"]
+    assert ("national_grid_us", "acct1") in device_info["identifiers"]
     assert device_info["name"] == "National Grid acct1"
     assert device_info["manufacturer"] == "National Grid"
 

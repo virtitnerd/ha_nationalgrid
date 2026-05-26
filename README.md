@@ -1,4 +1,4 @@
-# National Grid Integration for Home Assistant
+# National Grid US Integration
 
 [![GitHub Release](https://img.shields.io/github/v/release/virtitnerd/ha_nationalgrid?style=flat-square)](https://github.com/virtitnerd/ha_nationalgrid/releases)
 [![License](https://img.shields.io/github/license/virtitnerd/ha_nationalgrid?style=flat-square)](LICENSE)
@@ -29,7 +29,7 @@ This is a fork of [ryanmorash/ha_nationalgrid](https://github.com/ryanmorash/ha_
 
 > **Migrating from the original integration?** Uninstall `ryanmorash/ha_nationalgrid` from HACS and remove the integration entry from **Settings > Devices & Services** before installing this one. Both use the same domain (`national_grid`), so they cannot coexist.
 
-> **Upgrading from an earlier version of this fork?** Statistics IDs now include the account ID prefix (e.g., `national_grid:1234567890_SP001_electric_hourly_usage`). If you had the old format (`national_grid:SP001_electric_hourly_usage`) configured in the Energy Dashboard, you will need to update those references after upgrading. See [Long-Term Statistics](#long-term-statistics) for the new format.
+> **Upgrading from an earlier version of this fork?** Statistics IDs now include the account ID prefix (e.g., `national_grid_us:1234567890_SP001_electric_hourly_usage`). If you had the old format (`national_grid_us:SP001_electric_hourly_usage`) configured in the Energy Dashboard, you will need to update those references after upgrading. See [Long-Term Statistics](#long-term-statistics) for the new format.
 
 ### HACS (Recommended)
 
@@ -42,8 +42,8 @@ This is a fork of [ryanmorash/ha_nationalgrid](https://github.com/ryanmorash/ha_
 
 ### Manual Installation
 
-1. Download the `custom_components/national_grid` folder from this repository.
-2. Copy the `national_grid` folder into your Home Assistant `config/custom_components/` directory.
+1. Download the `custom_components/national_grid_us` folder from this repository.
+2. Copy the `national_grid_us` folder into your Home Assistant `config/custom_components/` directory.
 3. Restart Home Assistant.
 
 ## Configuration
@@ -77,7 +77,7 @@ To change which accounts are monitored after initial setup:
 1. Go to **Settings > Devices & Services**.
 2. Find the **National Grid** integration entry.
 3. Click the three-dot menu and select **Delete**.
-4. Optionally, remove the `custom_components/national_grid` folder and restart Home Assistant.
+4. Optionally, remove the `custom_components/national_grid_us` folder and restart Home Assistant.
 
 ## Devices & Entities
 
@@ -192,18 +192,18 @@ Statistics IDs include the account ID and service point to ensure uniqueness acr
 
 | Statistic ID                                                          | Description                              | Window   |
 | --------------------------------------------------------------------- | ---------------------------------------- | -------- |
-| `national_grid:{account_id}_{sp}_electric_hourly_usage`               | Consumption — verified AMI data (kWh)    | All available history |
-| `national_grid:{account_id}_{sp}_electric_return_hourly_usage`        | Return to grid / solar — verified (kWh)  | All available history |
-| `national_grid:{account_id}_{sp}_electric_interval_usage`             | Consumption — near real-time (kWh)       | ~2 days  |
-| `national_grid:{account_id}_{sp}_electric_interval_return_usage`      | Return to grid / solar — real-time (kWh) | ~2 days  |
+| `national_grid_us:{account_id}_{sp}_electric_hourly_usage`               | Consumption — verified AMI data (kWh)    | All available history |
+| `national_grid_us:{account_id}_{sp}_electric_return_hourly_usage`        | Return to grid / solar — verified (kWh)  | All available history |
+| `national_grid_us:{account_id}_{sp}_electric_interval_usage`             | Consumption — near real-time (kWh)       | ~2 days  |
+| `national_grid_us:{account_id}_{sp}_electric_interval_return_usage`      | Return to grid / solar — real-time (kWh) | ~2 days  |
 
 ### Gas Meters
 
 | Statistic ID                                       | Description           | Window   |
 | -------------------------------------------------- | --------------------- | -------- |
-| `national_grid:{account_id}_{sp}_gas_hourly_usage` | Gas consumption (CCF) | All available history |
+| `national_grid_us:{account_id}_{sp}_gas_hourly_usage` | Gas consumption (CCF) | All available history |
 
-> **Note**: `{account_id}` is your billing account number and `{sp}` is your meter's service point number. Both can be found in the device info for your meter in Home Assistant (e.g., `national_grid:1234567890_SP001_electric_hourly_usage`).
+> **Note**: `{account_id}` is your billing account number and `{sp}` is your meter's service point number. Both can be found in the device info for your meter in Home Assistant (e.g., `national_grid_us:1234567890_SP001_electric_hourly_usage`).
 
 ### Energy Dashboard Setup
 
@@ -211,17 +211,17 @@ Statistics IDs include the account ID and service point to ensure uniqueness acr
 
 1. Go to **Settings > Dashboards > Energy**
 2. Under **Electricity grid**, click **Add consumption** and search for your stat ID — add each one separately:
-   - `national_grid:{account_id}_{sp}_electric_hourly_usage` — verified AMI data (history beyond 2 days)
-   - `national_grid:{account_id}_{sp}_electric_interval_usage` — near real-time data (last ~2 days)
-   - If you have solar/return-to-grid, also add `national_grid:{account_id}_{sp}_electric_return_hourly_usage` under **Return to grid**
+   - `national_grid_us:{account_id}_{sp}_electric_hourly_usage` — verified AMI data (history beyond 2 days)
+   - `national_grid_us:{account_id}_{sp}_electric_interval_usage` — near real-time data (last ~2 days)
+   - If you have solar/return-to-grid, also add `national_grid_us:{account_id}_{sp}_electric_return_hourly_usage` under **Return to grid**
 3. Under **Gas consumption**, click **Add gas source** and add:
-   - `national_grid:{account_id}_{sp}_gas_hourly_usage`
+   - `national_grid_us:{account_id}_{sp}_gas_hourly_usage`
 
 > **Why two electricity sources?** National Grid takes 1–2 days to finalize and publish verified AMI readings. The interval stat bridges that gap with near-real-time data. The integration ensures there is no overlap between them — together they give you a complete, continuous picture with no double-counting.
 
 ## Services
 
-### `national_grid.force_full_refresh`
+### `national_grid_us.force_full_refresh`
 
 Triggers a full historical AMI re-import for all meters (or a specific integration entry). Equivalent to pressing the **Force Refresh** button on every meter device simultaneously.
 
@@ -234,7 +234,7 @@ Triggers a full historical AMI re-import for all meters (or a specific integrati
 **Example automation:**
 
 ```yaml
-service: national_grid.force_full_refresh
+service: national_grid_us.force_full_refresh
 data: {}
 ```
 
@@ -244,7 +244,7 @@ data: {}
 
 If you notice gaps in your statistics:
 
-1. Press the **Force Refresh** button on the affected meter device (found under Diagnostic entities), or call the `national_grid.force_full_refresh` service.
+1. Press the **Force Refresh** button on the affected meter device (found under Diagnostic entities), or call the `national_grid_us.force_full_refresh` service.
 2. Wait for completion (check logs for "Statistics import complete").
 3. Note: The AMI API's data availability window depends on National Grid's retention policy.
 
@@ -256,8 +256,8 @@ The first setup imports all available AMI history for each meter — how far bac
 
 If you upgraded from an earlier version, the statistics ID format changed to include the account ID prefix. Update your Energy Dashboard entries to the new format:
 
-- Old: `national_grid:{sp}_electric_hourly_usage`
-- New: `national_grid:{account_id}_{sp}_electric_hourly_usage`
+- Old: `national_grid_us:{sp}_electric_hourly_usage`
+- New: `national_grid_us:{account_id}_{sp}_electric_hourly_usage`
 
 ### Logs
 
@@ -267,6 +267,6 @@ Enable debug logging for detailed information:
 logger:
   default: info
   logs:
-    custom_components.national_grid: debug
+    custom_components.national_grid_us: debug
     py_nationalgrid: debug
 ```

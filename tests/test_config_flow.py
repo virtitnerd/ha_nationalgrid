@@ -15,7 +15,7 @@ from py_nationalgrid.exceptions import (
 )
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.national_grid.const import CONF_SELECTED_ACCOUNTS, DOMAIN
+from custom_components.national_grid_us.const import CONF_SELECTED_ACCOUNTS, DOMAIN
 
 from .conftest import (
     MOCK_ACCOUNT_ID,
@@ -24,7 +24,7 @@ from .conftest import (
     MOCK_USERNAME,
 )
 
-PATCH_CLIENT = "custom_components.national_grid.config_flow.NationalGridClient"
+PATCH_CLIENT = "custom_components.national_grid_us.config_flow.NationalGridClient"
 
 
 async def test_user_step_shows_form(hass: HomeAssistant) -> None:

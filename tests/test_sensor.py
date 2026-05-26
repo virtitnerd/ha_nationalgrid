@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 
 from homeassistant.components.sensor import SensorDeviceClass
 
-from custom_components.national_grid.const import UNIT_CCF, UNIT_KWH
-from custom_components.national_grid.coordinator import MeterData
-from custom_components.national_grid.sensor import (
+from custom_components.national_grid_us.const import UNIT_CCF, UNIT_KWH
+from custom_components.national_grid_us.coordinator import MeterData
+from custom_components.national_grid_us.sensor import (
     ACCOUNT_SENSOR_DESCRIPTIONS,
     PARALLEL_UPDATES,
     SENSOR_DESCRIPTIONS,
@@ -241,7 +241,7 @@ def test_account_sensor_unique_id() -> None:
         d for d in ACCOUNT_SENSOR_DESCRIPTIONS if d.key == "next_reading_date"
     )
     sensor = NationalGridAccountSensor(coordinator, "acct1", next_reading_desc)
-    assert sensor.unique_id == "national_grid_acct1_next_reading_date"
+    assert sensor.unique_id == "national_grid_us_acct1_next_reading_date"
 
 
 def test_account_sensor_native_value() -> None:

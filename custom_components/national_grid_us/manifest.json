@@ -1,6 +1,6 @@
 {
-  "domain": "national_grid",
-  "name": "National Grid",
+  "domain": "national_grid_us",
+  "name": "National Grid US",
   "codeowners": ["@virtitnerd"],
   "config_flow": true,
   "dependencies": ["recorder"],
@@ -8,6 +8,6 @@
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/virtitnerd/ha_nationalgrid/issues",
-  "requirements": ["py-nationalgrid==0.6.2"],
+  "requirements": ["py-nationalgrid==0.6.3"],
   "version": "0.0.0-dev"
 }

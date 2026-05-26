@@ -9,12 +9,12 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.national_grid.button import (
+from custom_components.national_grid_us.button import (
     PARALLEL_UPDATES,
     NationalGridForceRefreshButton,
 )
-from custom_components.national_grid.const import CONF_SELECTED_ACCOUNTS, DOMAIN
-from custom_components.national_grid.coordinator import MeterData
+from custom_components.national_grid_us.const import CONF_SELECTED_ACCOUNTS, DOMAIN
+from custom_components.national_grid_us.coordinator import MeterData
 
 from .conftest import (
     MOCK_ACCOUNT_ID,
@@ -30,8 +30,10 @@ from .conftest import (
     _mock_usages,
 )
 
-PATCH_CLIENT = "custom_components.national_grid.coordinator.NationalGridClient"
-PATCH_SESSION = "custom_components.national_grid.coordinator.async_create_clientsession"
+PATCH_CLIENT = "custom_components.national_grid_us.coordinator.NationalGridClient"
+PATCH_SESSION = (
+    "custom_components.national_grid_us.coordinator.async_create_clientsession"
+)
 
 
 def _make_meter_data(
@@ -139,7 +141,7 @@ async def test_button_setup_creates_entities(hass: HomeAssistant, config_entry) 
         patch(PATCH_CLIENT, return_value=_make_api_mock()),
         patch(PATCH_SESSION),
         patch(
-            "custom_components.national_grid.async_import_all_statistics",
+            "custom_components.national_grid_us.async_import_all_statistics",
             new_callable=AsyncMock,
         ),
     ):
@@ -148,7 +150,7 @@ async def test_button_setup_creates_entities(hass: HomeAssistant, config_entry) 
 
     ent_reg = er.async_get(hass)
     entity_id = ent_reg.async_get_entity_id(
-        "button", "national_grid", f"{MOCK_SERVICE_POINT}_force_refresh"
+        "button", "national_grid_us", f"{MOCK_SERVICE_POINT}_force_refresh"
     )
     assert entity_id is not None, (
         f"Expected button for {MOCK_SERVICE_POINT} to be registered"

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from custom_components.national_grid.binary_sensor import (
+from custom_components.national_grid_us.binary_sensor import (
     BINARY_SENSOR_DESCRIPTIONS,
     PARALLEL_UPDATES,
     NationalGridBinarySensor,
     _has_smart_meter,
 )
-from custom_components.national_grid.coordinator import MeterData
+from custom_components.national_grid_us.coordinator import MeterData
 
 
 def _make_meter_data(has_ami: bool) -> MeterData:

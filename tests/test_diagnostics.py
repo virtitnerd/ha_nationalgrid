@@ -9,8 +9,8 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.national_grid.const import CONF_SELECTED_ACCOUNTS, DOMAIN
-from custom_components.national_grid.diagnostics import (
+from custom_components.national_grid_us.const import CONF_SELECTED_ACCOUNTS, DOMAIN
+from custom_components.national_grid_us.diagnostics import (
     async_get_config_entry_diagnostics,
 )
 
@@ -27,9 +27,11 @@ from .conftest import (
     _mock_usages,
 )
 
-PATCH_CLIENT = "custom_components.national_grid.coordinator.NationalGridClient"
-PATCH_SESSION = "custom_components.national_grid.coordinator.async_create_clientsession"
-PATCH_STATISTICS = "custom_components.national_grid.async_import_all_statistics"
+PATCH_CLIENT = "custom_components.national_grid_us.coordinator.NationalGridClient"
+PATCH_SESSION = (
+    "custom_components.national_grid_us.coordinator.async_create_clientsession"
+)
+PATCH_STATISTICS = "custom_components.national_grid_us.async_import_all_statistics"
 
 
 @pytest.fixture

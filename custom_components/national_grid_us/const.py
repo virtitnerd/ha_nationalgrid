@@ -1,10 +1,10 @@
-"""Constants for national_grid."""
+"""Constants for national_grid_us."""
 
 from logging import Logger, getLogger
 
 _LOGGER: Logger = getLogger(__package__)
 
-DOMAIN = "national_grid"
+DOMAIN = "national_grid_us"
 ATTRIBUTION = "Data provided by National Grid"
 
 # Config entry data keys.

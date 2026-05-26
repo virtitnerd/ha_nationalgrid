@@ -16,12 +16,12 @@ from py_nationalgrid.exceptions import (
     NationalGridError,
 )
 
-from custom_components.national_grid.const import (
+from custom_components.national_grid_us.const import (
     _LOGGER,
     CONF_SELECTED_ACCOUNTS,
     DOMAIN,
 )
-from custom_components.national_grid.coordinator import (
+from custom_components.national_grid_us.coordinator import (
     NationalGridDataUpdateCoordinator,
 )
 
@@ -45,10 +45,10 @@ def _make_coordinator(
     """Create a coordinator with a mock API client and config entry."""
     with (
         patch(
-            "custom_components.national_grid.coordinator.async_create_clientsession",
+            "custom_components.national_grid_us.coordinator.async_create_clientsession",
         ),
         patch(
-            "custom_components.national_grid.coordinator.NationalGridClient",
+            "custom_components.national_grid_us.coordinator.NationalGridClient",
             return_value=api_mock,
         ),
     ):
@@ -512,7 +512,7 @@ async def test_get_next_reading_date_none_when_no_data(hass: HomeAssistant) -> N
 # ---------------------------------------------------------------------------
 
 
-@patch("custom_components.national_grid.coordinator.Store")
+@patch("custom_components.national_grid_us.coordinator.Store")
 async def test_async_initialize_skips_first_refresh_when_done(
     mock_store_cls, hass: HomeAssistant
 ) -> None:
@@ -530,7 +530,7 @@ async def test_async_initialize_skips_first_refresh_when_done(
     assert coordinator._is_first_refresh is False
 
 
-@patch("custom_components.national_grid.coordinator.Store")
+@patch("custom_components.national_grid_us.coordinator.Store")
 async def test_async_initialize_allows_first_refresh_when_not_done(
     mock_store_cls, hass: HomeAssistant
 ) -> None:
@@ -547,7 +547,7 @@ async def test_async_initialize_allows_first_refresh_when_not_done(
     assert coordinator._is_first_refresh is True
 
 
-@patch("custom_components.national_grid.coordinator.Store")
+@patch("custom_components.national_grid_us.coordinator.Store")
 async def test_async_initialize_allows_first_refresh_when_store_empty(
     mock_store_cls, hass: HomeAssistant
 ) -> None:
@@ -570,7 +570,7 @@ async def test_async_initialize_allows_first_refresh_when_store_empty(
 
 
 @patch(
-    "custom_components.national_grid.statistics.async_import_meter_statistics",
+    "custom_components.national_grid_us.statistics.async_import_meter_statistics",
     new_callable=AsyncMock,
 )
 async def test_async_force_refresh_meter_fetches_from_epoch(
@@ -729,7 +729,7 @@ async def test_async_refresh_full_with_clear_sets_pending_on_failure(
 # ---------------------------------------------------------------------------
 
 
-@patch("custom_components.national_grid.coordinator.Store")
+@patch("custom_components.national_grid_us.coordinator.Store")
 async def test_reset_to_first_refresh_sets_flag(
     mock_store_cls, hass: HomeAssistant
 ) -> None:
@@ -757,7 +757,9 @@ async def test_seed_from_previous_returns_empty_when_no_data(
     hass: HomeAssistant,
 ) -> None:
     """Test _seed_from_previous returns empty data when coordinator.data is None."""
-    from custom_components.national_grid.coordinator import NationalGridCoordinatorData
+    from custom_components.national_grid_us.coordinator import (
+        NationalGridCoordinatorData,
+    )
 
     api = _make_api()
     coordinator = _make_coordinator(hass, api)
@@ -811,7 +813,7 @@ def test_log_ami_results_no_dates(caplog: pytest.LogCaptureFixture) -> None:
     """Test _log_ami_results when readings exist but have no date field."""
     import logging
 
-    from custom_components.national_grid.coordinator import (
+    from custom_components.national_grid_us.coordinator import (
         NationalGridDataUpdateCoordinator,
     )
 
@@ -826,7 +828,7 @@ def test_log_ami_results_empty(caplog: pytest.LogCaptureFixture) -> None:
     """Test _log_ami_results when ami_data is an empty list."""
     import logging
 
-    from custom_components.national_grid.coordinator import (
+    from custom_components.national_grid_us.coordinator import (
         NationalGridDataUpdateCoordinator,
     )
 
@@ -1238,7 +1240,9 @@ async def test_fetch_bill_history_skipped_when_account_not_loaded(
     hass: HomeAssistant,
 ) -> None:
     """Test _fetch_bill_history is a no-op when account is not in data.accounts."""
-    from custom_components.national_grid.coordinator import NationalGridCoordinatorData
+    from custom_components.national_grid_us.coordinator import (
+        NationalGridCoordinatorData,
+    )
 
     api = _make_api()
     coordinator = _make_coordinator(hass, api)

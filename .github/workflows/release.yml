@@ -27,18 +27,18 @@ jobs:
       - name: Set version in manifest.json
         run: |
           sed -i '/version/c\  "version": "${{ steps.version.outputs.version }}"' \
-            ${{ github.workspace }}/custom_components/national_grid/manifest.json
+            ${{ github.workspace }}/custom_components/national_grid_us/manifest.json
 
       - name: ZIP integration directory
         run: |
-          cd ${{ github.workspace }}/custom_components/national_grid
-          zip -r national_grid.zip ./
+          cd ${{ github.workspace }}/custom_components/national_grid_us
+          zip -r national_grid_us.zip ./
 
       - name: Upload zip to release
         uses: svenstaro/upload-release-action@29e53e917877a24fad85510ded594ab3c9ca12de # v2.11.5
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ${{ github.workspace }}/custom_components/national_grid/national_grid.zip
-          asset_name: national_grid.zip
+          file: ${{ github.workspace }}/custom_components/national_grid_us/national_grid_us.zip
+          asset_name: national_grid_us.zip
           tag: ${{ github.ref }}
           overwrite: true

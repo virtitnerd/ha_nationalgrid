@@ -1,6 +1,6 @@
 """Tests for the National Grid constants module."""
 
-from custom_components.national_grid.const import (
+from custom_components.national_grid_us.const import (
     DOMAIN,
     UNIT_CCF,
     UNIT_KWH,
@@ -9,6 +9,6 @@ from custom_components.national_grid.const import (
 
 def test_constants_exist() -> None:
     """Test that expected constants are defined."""
-    assert DOMAIN == "national_grid"
+    assert DOMAIN == "national_grid_us"
     assert UNIT_KWH == "kWh"
     assert UNIT_CCF == "CCF"

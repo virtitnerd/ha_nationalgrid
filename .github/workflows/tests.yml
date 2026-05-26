@@ -40,7 +40,7 @@ jobs:
           pip install -r requirements_test.txt
 
       - name: Run tests
-        run: python -m pytest tests/ -v --tb=short --cov=custom_components/national_grid --cov-report=term-missing --cov-report=xml --cov-fail-under=90
+        run: python -m pytest tests/ -v --tb=short --cov=custom_components/national_grid_us --cov-report=term-missing --cov-report=xml --cov-fail-under=90
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1

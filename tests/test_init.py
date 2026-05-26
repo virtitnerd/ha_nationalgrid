@@ -12,7 +12,7 @@ from homeassistant.core import HomeAssistant
 from py_nationalgrid.exceptions import InvalidAuthError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.national_grid.const import CONF_SELECTED_ACCOUNTS, DOMAIN
+from custom_components.national_grid_us.const import CONF_SELECTED_ACCOUNTS, DOMAIN
 
 from .conftest import (
     MOCK_ACCOUNT_ID,
@@ -27,11 +27,13 @@ from .conftest import (
     _mock_usages,
 )
 
-PATCH_STATISTICS = "custom_components.national_grid.async_import_all_statistics"
+PATCH_STATISTICS = "custom_components.national_grid_us.async_import_all_statistics"
 
-PATCH_CLIENT = "custom_components.national_grid.coordinator.NationalGridClient"
-PATCH_SESSION = "custom_components.national_grid.coordinator.async_create_clientsession"
-PATCH_TRACK_TIME = "custom_components.national_grid.async_track_time_change"
+PATCH_CLIENT = "custom_components.national_grid_us.coordinator.NationalGridClient"
+PATCH_SESSION = (
+    "custom_components.national_grid_us.coordinator.async_create_clientsession"
+)
+PATCH_TRACK_TIME = "custom_components.national_grid_us.async_track_time_change"
 
 
 @pytest.fixture
@@ -70,7 +72,7 @@ async def test_setup_entry(hass: HomeAssistant, config_entry) -> None:
         patch(PATCH_CLIENT, return_value=_make_api_mock()),
         patch(PATCH_SESSION),
         patch(
-            "custom_components.national_grid.async_import_all_statistics",
+            "custom_components.national_grid_us.async_import_all_statistics",
             new_callable=AsyncMock,
         ),
     ):
@@ -87,7 +89,7 @@ async def test_unload_entry(hass: HomeAssistant, config_entry) -> None:
         patch(PATCH_CLIENT, return_value=_make_api_mock()),
         patch(PATCH_SESSION),
         patch(
-            "custom_components.national_grid.async_import_all_statistics",
+            "custom_components.national_grid_us.async_import_all_statistics",
             new_callable=AsyncMock,
         ),
     ):
@@ -112,7 +114,7 @@ async def test_setup_entry_auth_error(hass: HomeAssistant, config_entry) -> None
         patch(PATCH_CLIENT, return_value=api),
         patch(PATCH_SESSION),
         patch(
-            "custom_components.national_grid.async_import_all_statistics",
+            "custom_components.national_grid_us.async_import_all_statistics",
             new_callable=AsyncMock,
         ),
     ):
@@ -134,7 +136,7 @@ async def test_service_registered_after_setup(
         await hass.config_entries.async_setup(config_entry.entry_id)
         await hass.async_block_till_done()
 
-    from custom_components.national_grid.const import DOMAIN
+    from custom_components.national_grid_us.const import DOMAIN
 
     assert hass.services.has_service(DOMAIN, "force_full_refresh")
 
@@ -153,7 +155,7 @@ async def test_force_refresh_service_triggers_coordinator(
 
         mock_stats.reset_mock()
 
-        from custom_components.national_grid.const import DOMAIN
+        from custom_components.national_grid_us.const import DOMAIN
 
         coordinator = config_entry.runtime_data
         assert coordinator is not None
@@ -184,7 +186,7 @@ async def test_force_refresh_service_with_specific_entry_id(
 
         mock_stats.reset_mock()
 
-        from custom_components.national_grid.const import DOMAIN
+        from custom_components.national_grid_us.const import DOMAIN
 
         await hass.services.async_call(
             DOMAIN,
@@ -295,7 +297,7 @@ async def test_scheduled_refresh_interval_only(
 
 async def test_async_reload_entry(hass: HomeAssistant, config_entry) -> None:
     """Test async_reload_entry calls hass.config_entries.async_reload."""
-    from custom_components.national_grid import async_reload_entry
+    from custom_components.national_grid_us import async_reload_entry
 
     with patch.object(
         hass.config_entries,
@@ -321,7 +323,7 @@ async def test_force_refresh_service_unknown_entry_id(
 
         mock_stats.reset_mock()
 
-        from custom_components.national_grid.const import DOMAIN
+        from custom_components.national_grid_us.const import DOMAIN
 
         await hass.services.async_call(
             DOMAIN,
@@ -349,7 +351,7 @@ async def test_force_refresh_service_no_entries(
 
         mock_stats.reset_mock()
 
-        from custom_components.national_grid.const import DOMAIN
+        from custom_components.national_grid_us.const import DOMAIN
 
         with patch.object(hass.config_entries, "async_entries", return_value=[]):
             await hass.services.async_call(

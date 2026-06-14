@@ -598,6 +598,35 @@ async def test_account_selection_label_includes_service_address(
     assert "123 Main St" in options[0]["label"]
 
 
+async def test_account_selection_label_without_service_address_on_error(
+    hass: HomeAssistant,
+) -> None:
+    """Test account label falls back gracefully when get_billing_account raises."""
+    with patch(PATCH_CLIENT) as mock_cls:
+        client = mock_cls.return_value
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get_linked_accounts = AsyncMock(
+            return_value=[{"billingAccountId": MOCK_ACCOUNT_ID}],
+        )
+        client.get_billing_account = AsyncMock(side_effect=Exception("lookup failed"))
+
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={
+                CONF_USERNAME: MOCK_USERNAME,
+                CONF_PASSWORD: MOCK_PASSWORD,
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "select_accounts"
+    options = result["data_schema"].schema[CONF_SELECTED_ACCOUNTS].config["options"]
+    assert len(options) == 1
+    assert options[0]["label"] == f"Account {MOCK_ACCOUNT_ID}"
+
+
 async def test_already_configured(hass: HomeAssistant) -> None:
     """Test that duplicate unique_id aborts."""
     entry = MockConfigEntry(

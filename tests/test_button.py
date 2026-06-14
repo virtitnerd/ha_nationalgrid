@@ -161,24 +161,13 @@ async def test_button_setup_no_coordinator_data(
     hass: HomeAssistant, config_entry
 ) -> None:
     """Test button setup is a no-op when coordinator.data is None."""
-    with (
-        patch(PATCH_CLIENT, return_value=_make_api_mock()),
-        patch(PATCH_SESSION),
-        patch(
-            "custom_components.national_grid_us.async_import_all_statistics",
-            new_callable=AsyncMock,
-        ),
-        patch(
-            "custom_components.national_grid_us.button.async_setup_entry",
-            wraps=None,
-        ),
-    ):
-        # Simulate coordinator.data being None at button setup time
-        coordinator = MagicMock()
-        coordinator.data = None
-        from custom_components.national_grid_us.button import async_setup_entry
+    from custom_components.national_grid_us.button import async_setup_entry
 
-        added = []
-        await async_setup_entry(hass, config_entry, added.append)
+    coordinator = MagicMock()
+    coordinator.data = None
+    config_entry.runtime_data = coordinator
+
+    added = []
+    await async_setup_entry(hass, config_entry, added.append)
 
     assert added == [], "No buttons should be added when coordinator.data is None"

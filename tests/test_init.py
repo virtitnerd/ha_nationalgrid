@@ -473,10 +473,22 @@ async def test_async_migrate_entry_db_error(hass: HomeAssistant) -> None:
     assert entry.version == 2
 
 
-async def test_setup_entry_runs_statistics_rename(
-    hass: HomeAssistant, config_entry
-) -> None:
+async def test_setup_entry_runs_statistics_rename(hass: HomeAssistant) -> None:
     """Test async_setup_entry runs the statistics rename for old national_grid rows."""
+    # Use version=2 so async_migrate_entry is NOT triggered; only async_setup_entry
+    # calls _rename, giving exactly 4 execute calls (3 DELETEs + 1 UPDATE).
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=MOCK_USERNAME,
+        version=2,
+        data={
+            CONF_USERNAME: MOCK_USERNAME,
+            CONF_PASSWORD: MOCK_PASSWORD,
+            CONF_SELECTED_ACCOUNTS: [MOCK_ACCOUNT_ID],
+        },
+    )
+    entry.add_to_hass(hass)
+
     mock_instance = MagicMock()
     execute_result = MagicMock()
     execute_result.rowcount = 2
@@ -497,10 +509,10 @@ async def test_setup_entry_runs_statistics_rename(
             return_value=mock_instance,
         ),
     ):
-        await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-    assert config_entry.state is ConfigEntryState.LOADED
+    assert entry.state is ConfigEntryState.LOADED
     # 3 DELETEs + 1 UPDATE = 4 execute calls
     assert session.execute.call_count == 4
     session.commit.assert_called_once()

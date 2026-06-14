@@ -516,3 +516,62 @@ async def test_setup_entry_runs_statistics_rename(hass: HomeAssistant) -> None:
     # 3 DELETEs + 1 UPDATE = 4 execute calls
     assert session.execute.call_count == 4
     session.commit.assert_called_once()
+
+
+async def test_warn_if_old_component_present(
+    hass: HomeAssistant, config_entry, tmp_path
+) -> None:
+    """Test a persistent notification fires when the old national_grid folder exists."""
+    from homeassistant.components.persistent_notification import (
+        async_get as pn_get,
+    )
+
+    old_dir = tmp_path / "national_grid"
+    old_dir.mkdir()
+
+    with (
+        patch(PATCH_CLIENT, return_value=_make_api_mock()),
+        patch(PATCH_SESSION),
+        patch(PATCH_STATISTICS, new_callable=AsyncMock),
+        patch(
+            "custom_components.national_grid_us.recorder_get_instance",
+            side_effect=Exception("skip"),
+        ),
+        patch.object(hass.config, "path", return_value=str(tmp_path)),
+    ):
+        await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    notifications = pn_get(hass)
+    assert any(
+        n["notification_id"] == "national_grid_us_stale_folder"
+        for n in notifications.values()
+    )
+
+
+async def test_no_warn_without_old_component(
+    hass: HomeAssistant, config_entry, tmp_path
+) -> None:
+    """Test that no notification is created when the old folder is absent."""
+    from homeassistant.components.persistent_notification import (
+        async_get as pn_get,
+    )
+
+    with (
+        patch(PATCH_CLIENT, return_value=_make_api_mock()),
+        patch(PATCH_SESSION),
+        patch(PATCH_STATISTICS, new_callable=AsyncMock),
+        patch(
+            "custom_components.national_grid_us.recorder_get_instance",
+            side_effect=Exception("skip"),
+        ),
+        patch.object(hass.config, "path", return_value=str(tmp_path)),
+    ):
+        await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    notifications = pn_get(hass)
+    assert not any(
+        n["notification_id"] == "national_grid_us_stale_folder"
+        for n in notifications.values()
+    )

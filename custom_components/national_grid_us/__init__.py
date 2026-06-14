@@ -6,9 +6,13 @@ https://github.com/virtitnerd/ha_nationalgrid
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import voluptuous as vol
+from homeassistant.components.persistent_notification import (
+    async_create as pn_create,
+)
 from homeassistant.components.recorder import get_instance as recorder_get_instance
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.helpers import config_validation as cv
@@ -121,11 +125,42 @@ async def _async_migrate_statistics_v1_to_v2(hass: HomeAssistant) -> None:
         )
 
 
+def _warn_if_old_component_present(hass: HomeAssistant) -> None:
+    """Fire a persistent notification if the old national_grid folder still exists.
+
+    HACS installs national_grid_us into a new folder but does not remove the old
+    national_grid folder, which HA will attempt to load and may conflict.
+    """
+    old_path = Path(hass.config.path("custom_components", "national_grid"))
+    if not old_path.is_dir():
+        return
+    _LOGGER.warning(
+        "Old 'national_grid' custom component folder detected at %s. "
+        "Remove it and restart Home Assistant to avoid conflicts.",
+        str(old_path),
+    )
+    pn_create(
+        hass,
+        (
+            "The old **national_grid** custom component folder still exists.\n\n"
+            "HACS does not remove it automatically when upgrading to "
+            "**national_grid_us**. Please:\n\n"
+            "1. Delete `custom_components/national_grid/` from your config directory\n"
+            "2. Restart Home Assistant\n\n"
+            "Leaving both folders present can cause unexpected conflicts."
+        ),
+        title="Action required: remove old National Grid folder",
+        notification_id="national_grid_us_stale_folder",
+    )
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: NationalGridConfigEntry,
 ) -> bool:
     """Set up this integration using UI."""
+    _warn_if_old_component_present(hass)
+
     coordinator = NationalGridDataUpdateCoordinator(
         hass=hass,
         logger=_LOGGER,

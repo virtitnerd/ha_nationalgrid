@@ -237,13 +237,17 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self, current_selection: list[str] | None = None
     ) -> vol.Schema:
         """Get the schema for account selection, optionally pre-filling a selection."""
-        account_options = [
-            selector.SelectOptionDict(
-                value=account["billingAccountId"],
-                label=f"Account {account['billingAccountId']}",
+        account_options = []
+        for account in self._accounts:
+            label = f"Account {account['billingAccountId']}"
+            if address := account.get("serviceAddressCompressed"):
+                label = f"{label} — {address}"
+            account_options.append(
+                selector.SelectOptionDict(
+                    value=account["billingAccountId"],
+                    label=label,
+                )
             )
-            for account in self._accounts
-        ]
 
         field = (
             vol.Required(CONF_SELECTED_ACCOUNTS, default=current_selection)
@@ -266,7 +270,7 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     async def _fetch_accounts(
         self, username: str, password: str
     ) -> list[dict[str, str]]:
-        """Fetch linked accounts from the API."""
+        """Fetch linked accounts from the API, enriched with service addresses."""
         session = async_create_clientsession(self.hass, cookie_jar=create_cookie_jar())
         client = NationalGridClient(
             config=NationalGridConfig(username=username, password=password),
@@ -274,5 +278,20 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         )
         async with client:
             accounts = await client.get_linked_accounts()
-            # Convert to plain dicts for storage.
-            return [dict(account.items()) for account in accounts]  # type: ignore[arg-type]
+            result = []
+            for account in accounts:
+                account_dict: dict[str, str] = dict(account.items())  # type: ignore[arg-type]
+                try:
+                    billing = await client.get_billing_account(
+                        account["billingAccountId"]
+                    )
+                    account_dict["serviceAddressCompressed"] = (
+                        billing.get("serviceAddress", {}).get(
+                            "serviceAddressCompressed", ""
+                        )
+                        or ""
+                    )
+                except Exception:  # noqa: BLE001
+                    account_dict["serviceAddressCompressed"] = ""
+                result.append(account_dict)
+            return result

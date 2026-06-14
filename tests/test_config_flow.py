@@ -565,6 +565,39 @@ async def test_reconfigure_no_accounts_found(hass: HomeAssistant) -> None:
     assert result["reason"] == "no_accounts_found"
 
 
+async def test_account_selection_label_includes_service_address(
+    hass: HomeAssistant,
+) -> None:
+    """Test that account selection labels include service address when available."""
+    mock_billing = {
+        "serviceAddress": {"serviceAddressCompressed": "123 Main St, Albany NY 12201"}
+    }
+    with patch(PATCH_CLIENT) as mock_cls:
+        client = mock_cls.return_value
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get_linked_accounts = AsyncMock(
+            return_value=[{"billingAccountId": MOCK_ACCOUNT_ID}],
+        )
+        client.get_billing_account = AsyncMock(return_value=mock_billing)
+
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={
+                CONF_USERNAME: MOCK_USERNAME,
+                CONF_PASSWORD: MOCK_PASSWORD,
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "select_accounts"
+    options = result["data_schema"].schema[CONF_SELECTED_ACCOUNTS].config["options"]
+    assert len(options) == 1
+    assert options[0]["value"] == MOCK_ACCOUNT_ID
+    assert "123 Main St" in options[0]["label"]
+
+
 async def test_already_configured(hass: HomeAssistant) -> None:
     """Test that duplicate unique_id aborts."""
     entry = MockConfigEntry(

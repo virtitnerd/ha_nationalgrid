@@ -109,7 +109,7 @@ async def _async_migrate_statistics_v1_to_v2(hass: HomeAssistant) -> None:
             return result.rowcount  # type: ignore[return-value]
 
     try:
-        count = await hass.async_add_executor_job(_rename)
+        count = await instance.async_add_executor_job(_rename)
     except Exception as err:  # noqa: BLE001
         _LOGGER.warning("Statistics migration encountered an error: %s", err)
         return

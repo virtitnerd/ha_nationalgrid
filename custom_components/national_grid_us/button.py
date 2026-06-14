@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from homeassistant.components.button import ButtonEntity
 from homeassistant.const import EntityCategory
 
+from .const import DOMAIN
 from .entity import NationalGridEntity
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -26,10 +27,11 @@ async def async_setup_entry(
 ) -> None:
     """Set up National Grid button entities."""
     coordinator: NationalGridDataUpdateCoordinator = entry.runtime_data
-    async_add_entities(
-        NationalGridForceRefreshButton(coordinator, sp)
-        for sp in coordinator.data.meters
-    )
+    if coordinator.data:
+        async_add_entities(
+            NationalGridForceRefreshButton(coordinator, sp)
+            for sp in coordinator.data.meters
+        )
 
 
 class NationalGridForceRefreshButton(NationalGridEntity, ButtonEntity):
@@ -40,14 +42,9 @@ class NationalGridForceRefreshButton(NationalGridEntity, ButtonEntity):
     _attr_translation_key = "force_refresh"
 
     @property
-    def name(self) -> str:
-        """Return entity name."""
-        return "Force Refresh"
-
-    @property
     def unique_id(self) -> str:
         """Return unique ID."""
-        return f"{self._service_point_number}_force_refresh"
+        return f"{DOMAIN}_{self._service_point_number}_force_refresh"
 
     async def async_press(self) -> None:
         """Fetch full AMI history for this meter and re-import its statistics."""

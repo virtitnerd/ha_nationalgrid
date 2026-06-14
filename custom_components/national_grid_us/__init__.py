@@ -69,6 +69,28 @@ async def _async_migrate_statistics_v1_to_v2(hass: HomeAssistant) -> None:
         _LOGGER.debug("Recorder not available — skipping statistics migration")
         return
 
+    # Subquery: the new national_grid_us:* IDs that would result from renaming old rows.
+    # Any new rows with those IDs must be cleared first; the old national_grid:* rows
+    # carry the full historical data while the new rows only cover the ~45-day API
+    # window and will be re-imported on the next statistics cycle.
+    _conflict_ids_subq = (
+        "SELECT REPLACE(statistic_id, 'national_grid:', 'national_grid_us:') "
+        "FROM statistics_meta WHERE source = 'national_grid'"
+    )
+    _DELETE_STATS_SQL = (  # noqa: N806
+        "DELETE FROM statistics WHERE metadata_id IN "  # noqa: S608
+        "(SELECT id FROM statistics_meta WHERE source = 'national_grid_us' "
+        f"AND statistic_id IN ({_conflict_ids_subq}))"
+    )
+    _DELETE_SHORT_TERM_SQL = (  # noqa: N806
+        "DELETE FROM statistics_short_term WHERE metadata_id IN "  # noqa: S608
+        "(SELECT id FROM statistics_meta WHERE source = 'national_grid_us' "
+        f"AND statistic_id IN ({_conflict_ids_subq}))"
+    )
+    _DELETE_META_SQL = (  # noqa: N806
+        "DELETE FROM statistics_meta WHERE source = 'national_grid_us' "  # noqa: S608
+        f"AND statistic_id IN ({_conflict_ids_subq})"
+    )
     _UPDATE_SQL = (  # noqa: N806
         "UPDATE statistics_meta "
         "SET statistic_id = REPLACE("
@@ -79,6 +101,9 @@ async def _async_migrate_statistics_v1_to_v2(hass: HomeAssistant) -> None:
 
     def _rename() -> int:
         with instance.get_session() as session:
+            session.execute(sa_text(_DELETE_STATS_SQL))
+            session.execute(sa_text(_DELETE_SHORT_TERM_SQL))
+            session.execute(sa_text(_DELETE_META_SQL))
             result = session.execute(sa_text(_UPDATE_SQL))
             session.commit()
             return result.rowcount  # type: ignore[return-value]

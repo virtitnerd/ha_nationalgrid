@@ -496,5 +496,6 @@ async def test_setup_entry_runs_statistics_rename(
         await hass.async_block_till_done()
 
     assert config_entry.state is ConfigEntryState.LOADED
-    session.execute.assert_called_once()
+    # 3 DELETEs + 1 UPDATE = 4 execute calls
+    assert session.execute.call_count == 4
     session.commit.assert_called_once()

@@ -37,7 +37,7 @@ The integration follows the standard Home Assistant custom component pattern:
 
 - **`const.py`**: Domain, logger, attribution, `CONF_SELECTED_ACCOUNTS`, and unit constants (`UNIT_KWH`, `UNIT_CCF`).
 
-- **`statistics.py`**: Imports long-term statistics into Home Assistant's recorder. `async_import_all_statistics` processes 15-min AMI data for each meter. Creates `national_grid:{sp}_electric_hourly_usage` and `national_grid:{sp}_gas_hourly_usage` stat series. Supports first-refresh (full import), midnight-refresh (5-day window with backfill continuity), and incremental modes.
+- **`statistics.py`**: Imports long-term statistics into Home Assistant's recorder. `async_import_all_statistics` processes 15-min AMI data for each meter. Creates `national_grid_us:{account_id}_{sp}_electric_hourly_usage` and `national_grid_us:{account_id}_{sp}_gas_hourly_usage` stat series. Supports first-refresh (full import), midnight-refresh (5-day window with backfill continuity), and incremental modes.
 
 - **Platform files** (`sensor.py`, `binary_sensor.py`): Each defines entity descriptions and entity classes inheriting from `NationalGridEntity`.
 

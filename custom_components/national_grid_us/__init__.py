@@ -1,7 +1,7 @@
-"""Custom integration to integrate National Grid with Home Assistant.
+"""Custom integration to integrate National Grid US with Home Assistant.
 
 For more details about this integration, please refer to
-https://github.com/ryanmorash/ha_nationalgrid
+https://github.com/virtitnerd/ha_nationalgrid
 """
 
 from __future__ import annotations
@@ -9,10 +9,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import voluptuous as vol
+from homeassistant.components.recorder import get_instance as recorder_get_instance
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_track_time_change
+from sqlalchemy import text as sa_text
 
 from .const import _LOGGER, DOMAIN
 from .coordinator import NationalGridDataUpdateCoordinator
@@ -40,6 +42,57 @@ SERVICE_FORCE_REFRESH_SCHEMA = vol.Schema(
         vol.Optional("entry_id"): cv.string,
     }
 )
+
+
+async def async_migrate_entry(
+    hass: HomeAssistant,
+    config_entry: NationalGridConfigEntry,
+) -> bool:
+    """Migrate config entry to a newer version."""
+    _LOGGER.debug("Migrating config entry from version %s", config_entry.version)
+
+    if config_entry.version == 1:
+        await _async_migrate_statistics_v1_to_v2(hass)
+        hass.config_entries.async_update_entry(config_entry, version=2)
+        _LOGGER.info("Migrated National Grid US config entry to version 2")
+        return True
+
+    _LOGGER.error("Unknown config entry version: %s", config_entry.version)
+    return False
+
+
+async def _async_migrate_statistics_v1_to_v2(hass: HomeAssistant) -> None:
+    """Rename statistics from old national_grid domain to national_grid_us."""
+    try:
+        instance = recorder_get_instance(hass)
+    except Exception:  # noqa: BLE001
+        _LOGGER.debug("Recorder not available — skipping statistics migration")
+        return
+
+    _UPDATE_SQL = (  # noqa: N806
+        "UPDATE statistics_meta "
+        "SET statistic_id = REPLACE("
+        "statistic_id, 'national_grid:', 'national_grid_us:'), "
+        "    source = 'national_grid_us' "
+        "WHERE source = 'national_grid'"
+    )
+
+    def _rename() -> int:
+        with instance.get_session() as session:
+            result = session.execute(sa_text(_UPDATE_SQL))
+            return result.rowcount  # type: ignore[return-value]
+
+    try:
+        count = await hass.async_add_executor_job(_rename)
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("Statistics migration encountered an error: %s", err)
+        return
+
+    if count:
+        _LOGGER.info(
+            "Migrated %d long-term statistics from national_grid to national_grid_us",
+            count,
+        )
 
 
 async def async_setup_entry(
@@ -180,7 +233,12 @@ async def async_unload_entry(
     entry: NationalGridConfigEntry,
 ) -> bool:
     """Handle removal of an entry."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unload_ok and not any(
+        e.entry_id != entry.entry_id for e in hass.config_entries.async_entries(DOMAIN)
+    ):
+        hass.services.async_remove(DOMAIN, SERVICE_FORCE_REFRESH)
+    return unload_ok
 
 
 async def async_reload_entry(

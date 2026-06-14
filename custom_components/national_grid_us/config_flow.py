@@ -23,7 +23,7 @@ from .const import _LOGGER, CONF_SELECTED_ACCOUNTS, DOMAIN
 class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     """Config flow for national_grid."""
 
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self) -> None:
         """Initialize the config flow."""

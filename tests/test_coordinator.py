@@ -43,6 +43,8 @@ def _make_coordinator(
     hass: HomeAssistant, api_mock: AsyncMock
 ) -> NationalGridDataUpdateCoordinator:
     """Create a coordinator with a mock API client and config entry."""
+    mock_entry = MagicMock()
+    mock_entry.data = {CONF_SELECTED_ACCOUNTS: [MOCK_ACCOUNT_ID]}
     with (
         patch(
             "custom_components.national_grid_us.coordinator.async_create_clientsession",
@@ -52,18 +54,15 @@ def _make_coordinator(
             return_value=api_mock,
         ),
     ):
-        coordinator = NationalGridDataUpdateCoordinator(
+        return NationalGridDataUpdateCoordinator(
             hass=hass,
             logger=_LOGGER,
             name=DOMAIN,
             update_interval=timedelta(hours=1),
+            config_entry=mock_entry,
             username="test@example.com",
             password="password",
         )
-    mock_entry = MagicMock()
-    mock_entry.data = {CONF_SELECTED_ACCOUNTS: [MOCK_ACCOUNT_ID]}
-    coordinator.config_entry = mock_entry
-    return coordinator
 
 
 def _make_api() -> AsyncMock:
@@ -508,15 +507,15 @@ async def test_get_next_reading_date_none_when_no_data(hass: HomeAssistant) -> N
 
 
 # ---------------------------------------------------------------------------
-# async_initialize tests
+# _async_setup tests
 # ---------------------------------------------------------------------------
 
 
 @patch("custom_components.national_grid_us.coordinator.Store")
-async def test_async_initialize_skips_first_refresh_when_done(
+async def test__async_setup_skips_first_refresh_when_done(
     mock_store_cls, hass: HomeAssistant
 ) -> None:
-    """Test async_initialize sets _is_first_refresh=False when flag is persisted."""
+    """Test _async_setup sets _is_first_refresh=False when flag is persisted."""
     mock_store = AsyncMock()
     mock_store.async_load = AsyncMock(return_value={"initial_import_done": True})
     mock_store_cls.return_value = mock_store
@@ -525,16 +524,16 @@ async def test_async_initialize_skips_first_refresh_when_done(
     coordinator = _make_coordinator(hass, api)
     assert coordinator._is_first_refresh is True  # default
 
-    await coordinator.async_initialize()
+    await coordinator._async_setup()
 
     assert coordinator._is_first_refresh is False
 
 
 @patch("custom_components.national_grid_us.coordinator.Store")
-async def test_async_initialize_allows_first_refresh_when_not_done(
+async def test__async_setup_allows_first_refresh_when_not_done(
     mock_store_cls, hass: HomeAssistant
 ) -> None:
-    """Test async_initialize keeps _is_first_refresh=True when flag is absent."""
+    """Test _async_setup keeps _is_first_refresh=True when flag is absent."""
     mock_store = AsyncMock()
     mock_store.async_load = AsyncMock(return_value={})
     mock_store_cls.return_value = mock_store
@@ -542,16 +541,16 @@ async def test_async_initialize_allows_first_refresh_when_not_done(
     api = _make_api()
     coordinator = _make_coordinator(hass, api)
 
-    await coordinator.async_initialize()
+    await coordinator._async_setup()
 
     assert coordinator._is_first_refresh is True
 
 
 @patch("custom_components.national_grid_us.coordinator.Store")
-async def test_async_initialize_allows_first_refresh_when_store_empty(
+async def test__async_setup_allows_first_refresh_when_store_empty(
     mock_store_cls, hass: HomeAssistant
 ) -> None:
-    """Test async_initialize keeps _is_first_refresh=True when store returns None."""
+    """Test _async_setup keeps _is_first_refresh=True when store returns None."""
     mock_store = AsyncMock()
     mock_store.async_load = AsyncMock(return_value=None)
     mock_store_cls.return_value = mock_store
@@ -559,7 +558,7 @@ async def test_async_initialize_allows_first_refresh_when_store_empty(
     api = _make_api()
     coordinator = _make_coordinator(hass, api)
 
-    await coordinator.async_initialize()
+    await coordinator._async_setup()
 
     assert coordinator._is_first_refresh is True
 
@@ -741,7 +740,7 @@ async def test_reset_to_first_refresh_sets_flag(
 
     api = _make_api()
     coordinator = _make_coordinator(hass, api)
-    await coordinator.async_initialize()
+    await coordinator._async_setup()
     assert coordinator._is_first_refresh is False
 
     coordinator.reset_to_first_refresh()

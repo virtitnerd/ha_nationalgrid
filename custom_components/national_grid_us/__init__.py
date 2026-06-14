@@ -105,11 +105,10 @@ async def async_setup_entry(
         logger=_LOGGER,
         name=DOMAIN,
         update_interval=None,  # We use time-based scheduling instead
+        config_entry=entry,
         username=entry.data[CONF_USERNAME],
         password=entry.data[CONF_PASSWORD],
     )
-    coordinator.config_entry = entry
-    await coordinator.async_initialize()
 
     entry.runtime_data = coordinator
 

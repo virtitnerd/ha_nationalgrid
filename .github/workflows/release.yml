@@ -26,8 +26,10 @@ jobs:
 
       - name: Set version in manifest.json
         run: |
-          sed -i '/version/c\  "version": "${{ steps.version.outputs.version }}"' \
-            ${{ github.workspace }}/custom_components/national_grid_us/manifest.json
+          version="${{ steps.version.outputs.version }}"
+          manifest="${{ github.workspace }}/custom_components/national_grid_us/manifest.json"
+          jq --arg v "$version" '.version = $v' "$manifest" > "${manifest}.tmp"
+          mv "${manifest}.tmp" "$manifest"
 
       - name: ZIP integration directory
         run: |

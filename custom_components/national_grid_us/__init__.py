@@ -80,6 +80,7 @@ async def _async_migrate_statistics_v1_to_v2(hass: HomeAssistant) -> None:
     def _rename() -> int:
         with instance.get_session() as session:
             result = session.execute(sa_text(_UPDATE_SQL))
+            session.commit()
             return result.rowcount  # type: ignore[return-value]
 
     try:

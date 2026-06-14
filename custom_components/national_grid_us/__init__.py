@@ -114,7 +114,11 @@ async def async_setup_entry(
     entry.runtime_data = coordinator
 
     await coordinator.async_config_entry_first_refresh()
-    await async_import_all_statistics(hass, coordinator)
+    # Run the initial statistics import in the background so setup returns
+    # immediately after the coordinator data is fetched.  Writing potentially
+    # years of 15-min AMI data to the recorder can take tens of seconds and
+    # would otherwise block the config-flow UI until it finishes.
+    hass.async_create_task(async_import_all_statistics(hass, coordinator))
 
     # Pre-register Account devices so via_device links resolve correctly when
     # Meter entities from other platforms (binary_sensor, button) are registered.

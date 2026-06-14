@@ -85,11 +85,18 @@ class NationalGridDataUpdateCoordinator(
         logger: logging.Logger,
         name: str,
         update_interval: timedelta | None,
+        config_entry: NationalGridConfigEntry,
         username: str,
         password: str,
     ) -> None:
         """Initialize the coordinator."""
-        super().__init__(hass, logger, name=name, update_interval=update_interval)
+        super().__init__(
+            hass,
+            logger,
+            name=name,
+            update_interval=update_interval,
+            config_entry=config_entry,
+        )
         session = async_create_clientsession(hass, cookie_jar=create_cookie_jar())
         self.api = NationalGridClient(
             config=NationalGridConfig(username=username, password=password),
@@ -100,12 +107,12 @@ class NationalGridDataUpdateCoordinator(
         self._interval_only_mode = False  # When True, only fetch interval reads
         self._is_midnight_refresh = False  # When True, force full hourly import
         self._pending_full_refresh = False  # Retry flag for failed full refreshes
-        self._store: Store | None = None  # Initialised in async_initialize()
+        self._store: Store | None = None  # Initialised in _async_setup()
 
-    async def async_initialize(self) -> None:
+    async def _async_setup(self) -> None:
         """Load persisted state and configure initial refresh mode.
 
-        Must be called after config_entry is set, before the first refresh.
+        Called automatically by HA before the first data fetch.
         Reads from HA storage so that a completed initial import is not
         re-run on every Home Assistant restart.
         """

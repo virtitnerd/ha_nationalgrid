@@ -54,6 +54,11 @@
         }
     },
     "entity": {
+        "button": {
+            "force_refresh": {
+                "name": "Force Refresh"
+            }
+        },
         "sensor": {
             "energy_usage": {
                 "name": "Last Billing Usage"

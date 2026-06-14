@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
@@ -363,3 +363,156 @@ async def test_force_refresh_service_no_entries(
             await hass.async_block_till_done()
 
     assert not mock_stats.called
+
+
+async def test_unload_removes_service_when_last_entry(
+    hass: HomeAssistant, config_entry
+) -> None:
+    """Test service is removed when the last config entry is unloaded."""
+    with (
+        patch(PATCH_CLIENT, return_value=_make_api_mock()),
+        patch(PATCH_SESSION),
+        patch(PATCH_STATISTICS, new_callable=AsyncMock),
+    ):
+        await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert hass.services.has_service(DOMAIN, "force_full_refresh")
+
+    await hass.config_entries.async_unload(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert not hass.services.has_service(DOMAIN, "force_full_refresh")
+
+
+async def test_async_migrate_entry_v1_to_v2(hass: HomeAssistant) -> None:
+    """Test migration from version 1 to version 2 renames statistics."""
+    from custom_components.national_grid_us import async_migrate_entry
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=1,
+        data={},
+    )
+    entry.add_to_hass(hass)
+
+    mock_instance = MagicMock()
+    execute_result = MagicMock()
+    execute_result.rowcount = 3
+    session = mock_instance.get_session.return_value.__enter__.return_value
+    session.execute.return_value = execute_result
+
+    with patch(
+        "custom_components.national_grid_us.recorder_get_instance",
+        return_value=mock_instance,
+    ):
+        result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    assert entry.version == 2
+
+
+async def test_async_migrate_entry_unknown_version(hass: HomeAssistant) -> None:
+    """Test migration returns False for unknown config entry version."""
+    from custom_components.national_grid_us import async_migrate_entry
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=99,
+        data={},
+    )
+    entry.add_to_hass(hass)
+
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is False
+
+
+async def test_async_migrate_entry_recorder_unavailable(hass: HomeAssistant) -> None:
+    """Test migration completes gracefully when recorder is unavailable."""
+    from custom_components.national_grid_us import async_migrate_entry
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=1,
+        data={},
+    )
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.national_grid_us.recorder_get_instance",
+        side_effect=Exception("Recorder not ready"),
+    ):
+        result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    assert entry.version == 2
+
+
+async def test_async_migrate_entry_db_error(hass: HomeAssistant) -> None:
+    """Test migration completes gracefully when the DB update fails."""
+    from custom_components.national_grid_us import async_migrate_entry
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=1,
+        data={},
+    )
+    entry.add_to_hass(hass)
+
+    mock_instance = MagicMock()
+    mock_instance.get_session.return_value.__enter__.side_effect = Exception("DB error")
+
+    with patch(
+        "custom_components.national_grid_us.recorder_get_instance",
+        return_value=mock_instance,
+    ):
+        result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    assert entry.version == 2
+
+
+async def test_setup_entry_runs_statistics_rename(hass: HomeAssistant) -> None:
+    """Test async_setup_entry runs the statistics rename for old national_grid rows."""
+    # Use version=2 so async_migrate_entry is NOT triggered; only async_setup_entry
+    # calls _rename, giving exactly 4 execute calls (3 DELETEs + 1 UPDATE).
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=MOCK_USERNAME,
+        version=2,
+        data={
+            CONF_USERNAME: MOCK_USERNAME,
+            CONF_PASSWORD: MOCK_PASSWORD,
+            CONF_SELECTED_ACCOUNTS: [MOCK_ACCOUNT_ID],
+        },
+    )
+    entry.add_to_hass(hass)
+
+    mock_instance = MagicMock()
+    execute_result = MagicMock()
+    execute_result.rowcount = 2
+    session = mock_instance.get_session.return_value.__enter__.return_value
+    session.execute.return_value = execute_result
+    # async_add_executor_job must actually call the function; a plain MagicMock
+    # would be caught by the bare `except Exception` and silently skip _rename.
+    mock_instance.async_add_executor_job = AsyncMock(
+        side_effect=lambda fn, *args: fn(*args)
+    )
+
+    with (
+        patch(PATCH_CLIENT, return_value=_make_api_mock()),
+        patch(PATCH_SESSION),
+        patch(PATCH_STATISTICS, new_callable=AsyncMock),
+        patch(
+            "custom_components.national_grid_us.recorder_get_instance",
+            return_value=mock_instance,
+        ),
+    ):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    # 3 DELETEs + 1 UPDATE = 4 execute calls
+    assert session.execute.call_count == 4
+    session.commit.assert_called_once()

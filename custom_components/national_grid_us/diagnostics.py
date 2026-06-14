@@ -11,7 +11,16 @@ if TYPE_CHECKING:
 
     from .data import NationalGridConfigEntry
 
-_REDACT = {"username", "password", "accountNumber", "billingAccountId", "premiseNumber"}
+_REDACT = {
+    "username",
+    "password",
+    "accountNumber",
+    "billingAccountId",
+    "customerNumber",
+    "premiseNumber",
+    "serviceAddress",
+    "serviceAddressCompressed",
+}
 
 
 async def async_get_config_entry_diagnostics(

@@ -71,10 +71,10 @@ def test_parallel_updates() -> None:
 
 
 def test_button_unique_id() -> None:
-    """Test button unique_id is service_point + '_force_refresh'."""
+    """Test button unique_id includes DOMAIN prefix and service_point."""
     coordinator = _make_coordinator(_make_meter_data())
     button = NationalGridForceRefreshButton(coordinator, MOCK_SERVICE_POINT)
-    assert button.unique_id == f"{MOCK_SERVICE_POINT}_force_refresh"
+    assert button.unique_id == f"{DOMAIN}_{MOCK_SERVICE_POINT}_force_refresh"
 
 
 def test_button_unique_id_different_service_points() -> None:
@@ -150,8 +150,24 @@ async def test_button_setup_creates_entities(hass: HomeAssistant, config_entry) 
 
     ent_reg = er.async_get(hass)
     entity_id = ent_reg.async_get_entity_id(
-        "button", "national_grid_us", f"{MOCK_SERVICE_POINT}_force_refresh"
+        "button", "national_grid_us", f"{DOMAIN}_{MOCK_SERVICE_POINT}_force_refresh"
     )
     assert entity_id is not None, (
         f"Expected button for {MOCK_SERVICE_POINT} to be registered"
     )
+
+
+async def test_button_setup_no_coordinator_data(
+    hass: HomeAssistant, config_entry
+) -> None:
+    """Test button setup is a no-op when coordinator.data is None."""
+    from custom_components.national_grid_us.button import async_setup_entry
+
+    coordinator = MagicMock()
+    coordinator.data = None
+    config_entry.runtime_data = coordinator
+
+    added = []
+    await async_setup_entry(hass, config_entry, added.append)
+
+    assert added == [], "No buttons should be added when coordinator.data is None"

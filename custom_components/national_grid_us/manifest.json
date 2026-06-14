@@ -8,6 +8,6 @@
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/virtitnerd/ha_nationalgrid/issues",
-  "requirements": ["py-nationalgrid==0.6.3"],
+  "requirements": ["py-nationalgrid==0.6.4"],
   "version": "0.0.0-dev"
 }

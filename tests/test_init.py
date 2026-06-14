@@ -482,6 +482,11 @@ async def test_setup_entry_runs_statistics_rename(
     execute_result.rowcount = 2
     session = mock_instance.get_session.return_value.__enter__.return_value
     session.execute.return_value = execute_result
+    # async_add_executor_job must actually call the function; a plain MagicMock
+    # would be caught by the bare `except Exception` and silently skip _rename.
+    mock_instance.async_add_executor_job = AsyncMock(
+        side_effect=lambda fn, *args: fn(*args)
+    )
 
     with (
         patch(PATCH_CLIENT, return_value=_make_api_mock()),

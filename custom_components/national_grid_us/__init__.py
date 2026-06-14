@@ -114,6 +114,11 @@ async def async_setup_entry(
     entry.runtime_data = coordinator
 
     await coordinator.async_config_entry_first_refresh()
+
+    # Rename any statistics left over from the old `national_grid` domain.
+    # This is idempotent — zero rows affected after the first run.
+    await _async_migrate_statistics_v1_to_v2(hass)
+
     # Run the initial statistics import in the background so setup returns
     # immediately after the coordinator data is fetched.  Writing potentially
     # years of 15-min AMI data to the recorder can take tens of seconds and

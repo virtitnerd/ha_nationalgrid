@@ -471,3 +471,30 @@ async def test_async_migrate_entry_db_error(hass: HomeAssistant) -> None:
 
     assert result is True
     assert entry.version == 2
+
+
+async def test_setup_entry_runs_statistics_rename(
+    hass: HomeAssistant, config_entry
+) -> None:
+    """Test async_setup_entry runs the statistics rename for old national_grid rows."""
+    mock_instance = MagicMock()
+    execute_result = MagicMock()
+    execute_result.rowcount = 2
+    session = mock_instance.get_session.return_value.__enter__.return_value
+    session.execute.return_value = execute_result
+
+    with (
+        patch(PATCH_CLIENT, return_value=_make_api_mock()),
+        patch(PATCH_SESSION),
+        patch(PATCH_STATISTICS, new_callable=AsyncMock),
+        patch(
+            "custom_components.national_grid_us.recorder_get_instance",
+            return_value=mock_instance,
+        ),
+    ):
+        await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert config_entry.state is ConfigEntryState.LOADED
+    session.execute.assert_called_once()
+    session.commit.assert_called_once()

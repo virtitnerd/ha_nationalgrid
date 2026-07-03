@@ -401,6 +401,9 @@ async def test_async_migrate_entry_v1_to_v2(hass: HomeAssistant) -> None:
     execute_result.rowcount = 3
     session = mock_instance.get_session.return_value.__enter__.return_value
     session.execute.return_value = execute_result
+    mock_instance.async_add_executor_job = AsyncMock(
+        side_effect=lambda fn, *args: fn(*args)
+    )
 
     with patch(
         "custom_components.national_grid_us.recorder_get_instance",
@@ -410,6 +413,9 @@ async def test_async_migrate_entry_v1_to_v2(hass: HomeAssistant) -> None:
 
     assert result is True
     assert entry.version == 2
+    # 3 DELETEs + 1 UPDATE = 4 execute calls
+    assert session.execute.call_count == 4
+    session.commit.assert_called_once()
 
 
 async def test_async_migrate_entry_unknown_version(hass: HomeAssistant) -> None:

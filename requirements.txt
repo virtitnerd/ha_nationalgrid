@@ -1,4 +1,4 @@
 colorlog==6.10.1
 homeassistant==2026.6.0
 ruff==0.15.20
-py-nationalgrid==0.6.4
+py-nationalgrid==0.6.5

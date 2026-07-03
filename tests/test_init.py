@@ -522,10 +522,6 @@ async def test_warn_if_old_component_present(
     hass: HomeAssistant, config_entry, tmp_path
 ) -> None:
     """Test a persistent notification fires when the old national_grid folder exists."""
-    from homeassistant.components.persistent_notification import (
-        async_get as pn_get,
-    )
-
     old_dir = tmp_path / "national_grid"
     old_dir.mkdir()
 
@@ -537,15 +533,16 @@ async def test_warn_if_old_component_present(
             "custom_components.national_grid_us.recorder_get_instance",
             side_effect=Exception("skip"),
         ),
-        patch.object(hass.config, "path", return_value=str(tmp_path)),
+        patch.object(hass.config, "path", return_value=str(old_dir)),
+        patch("custom_components.national_grid_us.pn_create") as mock_pn,
     ):
         await hass.config_entries.async_setup(config_entry.entry_id)
         await hass.async_block_till_done()
 
-    notifications = pn_get(hass)
-    assert any(
-        n["notification_id"] == "national_grid_us_stale_folder"
-        for n in notifications.values()
+    mock_pn.assert_called_once()
+    assert (
+        mock_pn.call_args.kwargs.get("notification_id")
+        == "national_grid_us_stale_folder"
     )
 
 
@@ -553,10 +550,6 @@ async def test_no_warn_without_old_component(
     hass: HomeAssistant, config_entry, tmp_path
 ) -> None:
     """Test that no notification is created when the old folder is absent."""
-    from homeassistant.components.persistent_notification import (
-        async_get as pn_get,
-    )
-
     with (
         patch(PATCH_CLIENT, return_value=_make_api_mock()),
         patch(PATCH_SESSION),
@@ -565,13 +558,10 @@ async def test_no_warn_without_old_component(
             "custom_components.national_grid_us.recorder_get_instance",
             side_effect=Exception("skip"),
         ),
-        patch.object(hass.config, "path", return_value=str(tmp_path)),
+        patch.object(hass.config, "path", return_value=str(tmp_path / "nonexistent")),
+        patch("custom_components.national_grid_us.pn_create") as mock_pn,
     ):
         await hass.config_entries.async_setup(config_entry.entry_id)
         await hass.async_block_till_done()
 
-    notifications = pn_get(hass)
-    assert not any(
-        n["notification_id"] == "national_grid_us_stale_folder"
-        for n in notifications.values()
-    )
+    mock_pn.assert_not_called()

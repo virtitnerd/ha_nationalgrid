@@ -119,6 +119,22 @@ async def test_user_step_auth_error(hass: HomeAssistant) -> None:
     assert result["type"] is FlowResultType.FORM
     assert result["errors"]["base"] == "auth"
 
+    # Recovery: valid credentials should advance to account selection.
+    with patch(PATCH_CLIENT) as mock_cls:
+        client = mock_cls.return_value
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get_linked_accounts = AsyncMock(
+            return_value=[{"billingAccountId": MOCK_ACCOUNT_ID}],
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_USERNAME: MOCK_USERNAME, CONF_PASSWORD: MOCK_PASSWORD},
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "select_accounts"
+
 
 async def test_user_step_communication_error(hass: HomeAssistant) -> None:
     """Test user step with communication error."""
@@ -142,6 +158,22 @@ async def test_user_step_communication_error(hass: HomeAssistant) -> None:
     assert result["type"] is FlowResultType.FORM
     assert result["errors"]["base"] == "connection"
 
+    # Recovery: valid credentials should advance to account selection.
+    with patch(PATCH_CLIENT) as mock_cls:
+        client = mock_cls.return_value
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get_linked_accounts = AsyncMock(
+            return_value=[{"billingAccountId": MOCK_ACCOUNT_ID}],
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_USERNAME: MOCK_USERNAME, CONF_PASSWORD: MOCK_PASSWORD},
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "select_accounts"
+
 
 async def test_user_step_unknown_error(hass: HomeAssistant) -> None:
     """Test user step with unknown error."""
@@ -164,6 +196,22 @@ async def test_user_step_unknown_error(hass: HomeAssistant) -> None:
 
     assert result["type"] is FlowResultType.FORM
     assert result["errors"]["base"] == "unknown"
+
+    # Recovery: valid credentials should advance to account selection.
+    with patch(PATCH_CLIENT) as mock_cls:
+        client = mock_cls.return_value
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get_linked_accounts = AsyncMock(
+            return_value=[{"billingAccountId": MOCK_ACCOUNT_ID}],
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_USERNAME: MOCK_USERNAME, CONF_PASSWORD: MOCK_PASSWORD},
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "select_accounts"
 
 
 async def test_select_accounts_step(hass: HomeAssistant) -> None:

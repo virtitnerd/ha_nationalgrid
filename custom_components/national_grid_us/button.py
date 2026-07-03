@@ -41,10 +41,18 @@ class NationalGridForceRefreshButton(NationalGridEntity, ButtonEntity):
     _attr_icon = "mdi:refresh"
     _attr_translation_key = "force_refresh"
 
-    @property
-    def unique_id(self) -> str:
-        """Return unique ID."""
-        return f"{DOMAIN}_{self._service_point_number}_force_refresh"
+    def __init__(
+        self,
+        coordinator: NationalGridDataUpdateCoordinator,
+        service_point_number: str,
+    ) -> None:
+        """Initialize the force refresh button."""
+        super().__init__(coordinator, service_point_number)
+        meter_data = coordinator.get_meter_data(service_point_number)
+        account_id = meter_data.account_id if meter_data else ""
+        self._attr_unique_id = (
+            f"{DOMAIN}_{account_id}_{service_point_number}_force_refresh"
+        )
 
     async def async_press(self) -> None:
         """Fetch full AMI history for this meter and re-import its statistics."""

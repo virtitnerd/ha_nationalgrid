@@ -321,7 +321,7 @@ class NationalGridDataUpdateCoordinator(
         # Extract meters from the billing account.
         meter_nodes = billing_account.get("meter", {}).get("nodes", [])
         for meter in meter_nodes:
-            service_point = str(meter.get("servicePointNumber", ""))
+            service_point = str(meter.get("servicePointNumber") or "")
             if service_point:
                 data.meters[service_point] = MeterData(
                     meter=meter,

@@ -74,7 +74,8 @@ def test_button_unique_id() -> None:
     """Test button unique_id includes DOMAIN prefix and service_point."""
     coordinator = _make_coordinator(_make_meter_data())
     button = NationalGridForceRefreshButton(coordinator, MOCK_SERVICE_POINT)
-    assert button.unique_id == f"{DOMAIN}_{MOCK_SERVICE_POINT}_force_refresh"
+    expected_uid = f"{DOMAIN}_{MOCK_ACCOUNT_ID}_{MOCK_SERVICE_POINT}_force_refresh"
+    assert button.unique_id == expected_uid
 
 
 def test_button_unique_id_different_service_points() -> None:
@@ -150,7 +151,9 @@ async def test_button_setup_creates_entities(hass: HomeAssistant, config_entry) 
 
     ent_reg = er.async_get(hass)
     entity_id = ent_reg.async_get_entity_id(
-        "button", "national_grid_us", f"{DOMAIN}_{MOCK_SERVICE_POINT}_force_refresh"
+        "button",
+        "national_grid_us",
+        f"{DOMAIN}_{MOCK_ACCOUNT_ID}_{MOCK_SERVICE_POINT}_force_refresh",
     )
     assert entity_id is not None, (
         f"Expected button for {MOCK_SERVICE_POINT} to be registered"

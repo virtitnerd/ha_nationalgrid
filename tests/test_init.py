@@ -386,7 +386,7 @@ async def test_unload_removes_service_when_last_entry(
 
 
 async def test_async_migrate_entry_v1_to_v2(hass: HomeAssistant) -> None:
-    """Test migration from version 1 to version 2 renames statistics."""
+    """Test migration from version 1 to version 2 bumps the entry version."""
     from custom_components.national_grid_us import async_migrate_entry
 
     entry = MockConfigEntry(
@@ -396,17 +396,7 @@ async def test_async_migrate_entry_v1_to_v2(hass: HomeAssistant) -> None:
     )
     entry.add_to_hass(hass)
 
-    mock_instance = MagicMock()
-    execute_result = MagicMock()
-    execute_result.rowcount = 3
-    session = mock_instance.get_session.return_value.__enter__.return_value
-    session.execute.return_value = execute_result
-
-    with patch(
-        "custom_components.national_grid_us.recorder_get_instance",
-        return_value=mock_instance,
-    ):
-        result = await async_migrate_entry(hass, entry)
+    result = await async_migrate_entry(hass, entry)
 
     assert result is True
     assert entry.version == 2
@@ -428,49 +418,35 @@ async def test_async_migrate_entry_unknown_version(hass: HomeAssistant) -> None:
     assert result is False
 
 
-async def test_async_migrate_entry_recorder_unavailable(hass: HomeAssistant) -> None:
-    """Test migration completes gracefully when recorder is unavailable."""
-    from custom_components.national_grid_us import async_migrate_entry
-
+async def test_setup_entry_db_error(hass: HomeAssistant) -> None:
+    """Test setup completes gracefully when the statistics DB rename fails."""
     entry = MockConfigEntry(
         domain=DOMAIN,
-        version=1,
-        data={},
-    )
-    entry.add_to_hass(hass)
-
-    with patch(
-        "custom_components.national_grid_us.recorder_get_instance",
-        side_effect=Exception("Recorder not ready"),
-    ):
-        result = await async_migrate_entry(hass, entry)
-
-    assert result is True
-    assert entry.version == 2
-
-
-async def test_async_migrate_entry_db_error(hass: HomeAssistant) -> None:
-    """Test migration completes gracefully when the DB update fails."""
-    from custom_components.national_grid_us import async_migrate_entry
-
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        version=1,
-        data={},
+        version=2,
+        data={
+            CONF_USERNAME: MOCK_USERNAME,
+            CONF_PASSWORD: MOCK_PASSWORD,
+            CONF_SELECTED_ACCOUNTS: [MOCK_ACCOUNT_ID],
+        },
     )
     entry.add_to_hass(hass)
 
     mock_instance = MagicMock()
-    mock_instance.get_session.return_value.__enter__.side_effect = Exception("DB error")
+    mock_instance.async_add_executor_job = AsyncMock(side_effect=Exception("DB error"))
 
-    with patch(
-        "custom_components.national_grid_us.recorder_get_instance",
-        return_value=mock_instance,
+    with (
+        patch(PATCH_CLIENT, return_value=_make_api_mock()),
+        patch(PATCH_SESSION),
+        patch(PATCH_STATISTICS, new_callable=AsyncMock),
+        patch(
+            "custom_components.national_grid_us.recorder_get_instance",
+            return_value=mock_instance,
+        ),
     ):
-        result = await async_migrate_entry(hass, entry)
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
 
-    assert result is True
-    assert entry.version == 2
+    assert entry.state is ConfigEntryState.LOADED
 
 
 async def test_setup_entry_runs_statistics_rename(hass: HomeAssistant) -> None:

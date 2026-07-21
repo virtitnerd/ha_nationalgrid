@@ -40,7 +40,7 @@ def test_entity_device_info_with_meter_data() -> None:
     entity = NationalGridEntity(coordinator, "SP1")
     device_info = entity._attr_device_info
     assert device_info is not None
-    assert ("national_grid_us", "SP1") in device_info["identifiers"]
+    assert ("national_grid_us", "acct1_SP1") in device_info["identifiers"]
     assert device_info["serial_number"] == "MTR001"
     assert device_info["name"] == "Electric Meter acct1-SP1"
 

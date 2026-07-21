@@ -752,10 +752,8 @@ async def test_reset_to_first_refresh_sets_flag(
 # ---------------------------------------------------------------------------
 
 
-async def test_seed_from_previous_returns_empty_when_no_data(
-    hass: HomeAssistant,
-) -> None:
-    """Test _seed_from_previous returns empty data when coordinator.data is None."""
+async def test_first_fetch_produces_populated_data(hass: HomeAssistant) -> None:
+    """Test coordinator produces complete data on first fetch from no previous state."""
     from custom_components.national_grid_us.coordinator import (
         NationalGridCoordinatorData,
     )
@@ -764,27 +762,14 @@ async def test_seed_from_previous_returns_empty_when_no_data(
     coordinator = _make_coordinator(hass, api)
     coordinator.data = None
 
-    seeded = coordinator._seed_from_previous()
-    assert isinstance(seeded, NationalGridCoordinatorData)
-    assert seeded.accounts == {}
-    assert seeded.meters == {}
-    assert seeded.usages == {}
-    assert seeded.costs == {}
-    assert seeded.ami_usages == {}
-    assert seeded.interval_reads == {}
-
-
-async def test_seed_from_previous_copies_previous_data(hass: HomeAssistant) -> None:
-    """Test _seed_from_previous copies data from the previous fetch."""
-    api = _make_api()
-    coordinator = _make_coordinator(hass, api)
-    coordinator.data = await coordinator._async_update_data()
-
-    seeded = coordinator._seed_from_previous()
-    assert MOCK_ACCOUNT_ID in seeded.accounts
-    assert len(seeded.meters) == 2
-    assert MOCK_ACCOUNT_ID in seeded.usages
-    assert MOCK_ACCOUNT_ID in seeded.costs
+    data = await coordinator._async_update_data()
+    assert isinstance(data, NationalGridCoordinatorData)
+    assert MOCK_ACCOUNT_ID in data.accounts
+    assert len(data.meters) == 2
+    assert MOCK_ACCOUNT_ID in data.usages
+    assert MOCK_ACCOUNT_ID in data.costs
+    assert data.ami_usages
+    assert data.interval_reads
 
 
 # ---------------------------------------------------------------------------
@@ -1238,16 +1223,11 @@ async def test_fetch_bill_history_skipped_in_interval_only_mode(
 async def test_fetch_bill_history_skipped_when_account_not_loaded(
     hass: HomeAssistant,
 ) -> None:
-    """Test _fetch_bill_history is a no-op when account is not in data.accounts."""
-    from custom_components.national_grid_us.coordinator import (
-        NationalGridCoordinatorData,
-    )
-
+    """Test _fetch_bill_history is a no-op when account is not in accounts dict."""
     api = _make_api()
     coordinator = _make_coordinator(hass, api)
-    coordinator.data = NationalGridCoordinatorData(accounts={})
 
-    await coordinator._fetch_bill_history(coordinator.data, "nonexistent_account")
+    await coordinator._fetch_bill_history({}, "nonexistent_account", {}, {})
 
     api.get_electric_bill_history.assert_not_called()
     api.get_gas_bill_history.assert_not_called()

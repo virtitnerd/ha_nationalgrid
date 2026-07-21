@@ -56,7 +56,6 @@ async def async_migrate_entry(
     _LOGGER.debug("Migrating config entry from version %s", config_entry.version)
 
     if config_entry.version == 1:
-        await _async_migrate_statistics_v1_to_v2(hass)
         hass.config_entries.async_update_entry(config_entry, version=2)
         _LOGGER.info("Migrated National Grid US config entry to version 2")
         return True
@@ -110,7 +109,7 @@ async def _async_migrate_statistics_v1_to_v2(hass: HomeAssistant) -> None:
             session.execute(sa_text(_DELETE_META_SQL))
             result = session.execute(sa_text(_UPDATE_SQL))
             session.commit()
-            return result.rowcount  # type: ignore[return-value]
+            return result.rowcount  # type: ignore[attr-defined]
 
     try:
         count = await instance.async_add_executor_job(_rename)

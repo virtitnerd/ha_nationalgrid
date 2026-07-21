@@ -88,8 +88,10 @@ class NationalGridBinarySensor(NationalGridEntity, BinarySensorEntity):
         """Initialize the binary sensor."""
         super().__init__(coordinator, service_point_number)
         self.entity_description = entity_description
+        meter_data = coordinator.get_meter_data(service_point_number)
+        account_id = meter_data.account_id if meter_data else ""
         self._attr_unique_id = (
-            f"{DOMAIN}_{service_point_number}_{entity_description.key}"
+            f"{DOMAIN}_{account_id}_{service_point_number}_{entity_description.key}"
         )
 
     @property

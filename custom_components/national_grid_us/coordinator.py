@@ -181,7 +181,7 @@ class NationalGridDataUpdateCoordinator(
         self._previous_update_success = True
         return data
 
-    async def _fetch_all_data(self) -> NationalGridCoordinatorData:  # noqa: PLR0912
+    async def _fetch_all_data(self) -> NationalGridCoordinatorData:  # noqa: PLR0912, PLR0915
         """Fetch all data from the API."""
         selected_accounts: list[str] = self.config_entry.data.get(
             CONF_SELECTED_ACCOUNTS, []
@@ -194,20 +194,25 @@ class NationalGridDataUpdateCoordinator(
                 "Full refresh started for %s account(s)", len(selected_accounts)
             )
 
-        # Seed from previous data to preserve stale data on per-account errors.
-        data = self._seed_from_previous()
-
-        # Mark if this is the first refresh for historical import
-        data.is_first_refresh = self._is_first_refresh
-
-        # Mark if this is a midnight refresh
-        data.is_midnight_refresh = self._is_midnight_refresh
-
         if self._is_first_refresh:
             _LOGGER.info("First refresh - fetching AMI from epoch via primary endpoint")
 
         if self._is_midnight_refresh:
             _LOGGER.info("Midnight refresh - will force full hourly import")
+
+        # Seed each accumulator dict from previous data to preserve stale data
+        # on per-account errors.  Build NationalGridCoordinatorData at the end.
+        prev = self.data
+        accounts = dict(prev.accounts) if prev else {}
+        ami_usages = dict(prev.ami_usages) if prev else {}
+        bills = dict(prev.bills) if prev else {}
+        costs = dict(prev.costs) if prev else {}
+        electric_bill_history = dict(prev.electric_bill_history) if prev else {}
+        gas_bill_history = dict(prev.gas_bill_history) if prev else {}
+        interval_reads = dict(prev.interval_reads) if prev else {}
+        meters = dict(prev.meters) if prev else {}
+        reading_dates = dict(prev.reading_dates) if prev else {}
+        usages = dict(prev.usages) if prev else {}
 
         # Calculate from_month for usage query.
         # On first refresh: get up to 465 days of history
@@ -226,7 +231,20 @@ class NationalGridDataUpdateCoordinator(
 
         for account_id in selected_accounts:
             try:
-                await self._fetch_account_data(account_id, today, from_month, data)
+                await self._fetch_account_data(
+                    account_id,
+                    today,
+                    from_month,
+                    accounts,
+                    meters,
+                    usages,
+                    costs,
+                    bills,
+                    electric_bill_history,
+                    gas_bill_history,
+                    ami_usages,
+                    interval_reads,
+                )
             except InvalidAuthError:
                 # Re-raise auth errors to trigger reauth flow.
                 raise
@@ -248,22 +266,20 @@ class NationalGridDataUpdateCoordinator(
                     acct_id = link.get("billingAccountId", "")
                     if acct_id in selected_accounts:
                         billing = link.get("billingAccount") or {}
-                        data.reading_dates[acct_id] = billing.get(
-                            "nextSchedReadingDate"
-                        )
+                        reading_dates[acct_id] = billing.get("nextSchedReadingDate")
             except (CannotConnectError, RetryExhaustedError, NationalGridError) as err:
                 _LOGGER.debug("Could not fetch next reading dates: %s", err)
 
         # Log completion at INFO level with summary
         if self._interval_only_mode:
-            interval_count = sum(len(r) for r in data.interval_reads.values())
+            interval_count = sum(len(r) for r in interval_reads.values())
             _LOGGER.info(
                 "Interval-only refresh complete: %s interval reads fetched",
                 interval_count,
             )
         else:
-            ami_count = sum(len(a) for a in data.ami_usages.values())
-            interval_count = sum(len(r) for r in data.interval_reads.values())
+            ami_count = sum(len(a) for a in ami_usages.values())
+            interval_count = sum(len(r) for r in interval_reads.values())
             _LOGGER.info(
                 "Full refresh complete: %s AMI 15-min records,"
                 " %s interval reads fetched",
@@ -279,38 +295,41 @@ class NationalGridDataUpdateCoordinator(
             if self._store is not None:
                 await self._store.async_save({"initial_import_done": True})
 
-        return data
-
-    def _seed_from_previous(self) -> NationalGridCoordinatorData:
-        """Create coordinator data seeded from previous fetch results."""
-        prev = self.data
-        if prev is None:
-            return NationalGridCoordinatorData(accounts={})
         return NationalGridCoordinatorData(
-            accounts=dict(prev.accounts),
-            ami_usages=dict(prev.ami_usages),
-            bills=dict(prev.bills),
-            costs=dict(prev.costs),
-            electric_bill_history=dict(prev.electric_bill_history),
-            gas_bill_history=dict(prev.gas_bill_history),
-            interval_reads=dict(prev.interval_reads),
-            meters=dict(prev.meters),
-            reading_dates=dict(prev.reading_dates),
-            usages=dict(prev.usages),
+            accounts=accounts,
+            ami_usages=ami_usages,
+            bills=bills,
+            costs=costs,
+            electric_bill_history=electric_bill_history,
+            gas_bill_history=gas_bill_history,
+            interval_reads=interval_reads,
+            meters=meters,
+            reading_dates=reading_dates,
+            usages=usages,
+            is_first_refresh=self._is_first_refresh,
+            is_midnight_refresh=self._is_midnight_refresh,
         )
 
-    async def _fetch_account_data(
+    async def _fetch_account_data(  # noqa: PLR0913
         self,
         account_id: str,
         today: date,
         from_month: int,
-        data: NationalGridCoordinatorData,
+        accounts: dict,
+        meters: dict,
+        usages: dict,
+        costs: dict,
+        bills: dict,
+        electric_bill_history: dict,
+        gas_bill_history: dict,
+        ami_usages: dict,
+        interval_reads: dict,
     ) -> None:
         """Fetch billing, usage, cost, and AMI data for a single account."""
         # Fetch billing account info (always needed for premise number).
         _LOGGER.debug("Fetching billing account: %s", account_id)
         billing_account = await self.api.get_billing_account(account_id)
-        data.accounts[account_id] = billing_account
+        accounts[account_id] = billing_account
         _LOGGER.debug(
             "Billing account %s: region=%s, meters=%s",
             account_id,
@@ -321,9 +340,9 @@ class NationalGridDataUpdateCoordinator(
         # Extract meters from the billing account.
         meter_nodes = billing_account.get("meter", {}).get("nodes", [])
         for meter in meter_nodes:
-            service_point = str(meter.get("servicePointNumber", ""))
+            service_point = str(meter.get("servicePointNumber") or "")
             if service_point:
-                data.meters[service_point] = MeterData(
+                meters[service_point] = MeterData(
                     meter=meter,
                     account_id=account_id,
                     billing_account=billing_account,
@@ -337,18 +356,20 @@ class NationalGridDataUpdateCoordinator(
         # Skip usage/cost/bill fetching in interval-only mode
         if not self._interval_only_mode:
             # Fetch energy usages.
-            data.usages[account_id] = await self._fetch_usages(account_id, from_month)
+            usages[account_id] = await self._fetch_usages(account_id, from_month)
 
             # Fetch energy costs (company_code is the region from billing account).
-            data.costs[account_id] = await self._fetch_costs(
+            costs[account_id] = await self._fetch_costs(
                 account_id, today, billing_account
             )
 
             # Fetch bill history.
-            data.bills[account_id] = await self._fetch_bills(account_id)
+            bills[account_id] = await self._fetch_bills(account_id)
 
             # Fetch business portal bill history (utility/supplier charge breakdown).
-            await self._fetch_bill_history(data, account_id)
+            await self._fetch_bill_history(
+                accounts, account_id, electric_bill_history, gas_bill_history
+            )
 
         # Fetch AMI and interval read data for AMI-capable meters.
         # In interval-only mode: skips slow GraphQL AMI fetch, does interval reads only.
@@ -357,9 +378,9 @@ class NationalGridDataUpdateCoordinator(
             billing_account,
             meter_nodes,
             today,
-            data.ami_usages,
-            data.interval_reads,
-            is_first_refresh=data.is_first_refresh,
+            ami_usages,
+            interval_reads,
+            is_first_refresh=self._is_first_refresh,
         )
 
     async def _fetch_usages(
@@ -455,8 +476,10 @@ class NationalGridDataUpdateCoordinator(
 
     async def _fetch_bill_history(
         self,
-        data: NationalGridCoordinatorData,
+        accounts: dict,
         account_id: str,
+        electric_bill_history: dict,
+        gas_bill_history: dict,
     ) -> None:
         """Fetch per-period bill history from the business portal for an account.
 
@@ -465,7 +488,7 @@ class NationalGridDataUpdateCoordinator(
         warnings and the history dict for that fuel type is left unchanged
         (preserving stale data from the previous refresh).
         """
-        billing_account = data.accounts.get(account_id)
+        billing_account = accounts.get(account_id)
         if not billing_account:
             return
         customer_number = billing_account.get("customerNumber")
@@ -483,14 +506,14 @@ class NationalGridDataUpdateCoordinator(
 
         if "ELECTRIC" in fuel_types:
             try:
-                data.electric_bill_history[
+                electric_bill_history[
                     account_id
                 ] = await self.api.get_electric_bill_history(
                     account_id, customer_number
                 )
                 _LOGGER.debug(
                     "Fetched %s electric bill history records for account %s",
-                    len(data.electric_bill_history[account_id]),
+                    len(electric_bill_history[account_id]),
                     account_id,
                 )
             except Exception as err:  # noqa: BLE001
@@ -502,12 +525,12 @@ class NationalGridDataUpdateCoordinator(
 
         if "GAS" in fuel_types:
             try:
-                data.gas_bill_history[account_id] = await self.api.get_gas_bill_history(
+                gas_bill_history[account_id] = await self.api.get_gas_bill_history(
                     account_id, customer_number
                 )
                 _LOGGER.debug(
                     "Fetched %s gas bill history records for account %s",
-                    len(data.gas_bill_history[account_id]),
+                    len(gas_bill_history[account_id]),
                     account_id,
                 )
             except Exception as err:  # noqa: BLE001

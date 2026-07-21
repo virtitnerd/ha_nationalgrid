@@ -88,7 +88,7 @@ class NationalGridEntity(CoordinatorEntity[NationalGridDataUpdateCoordinator]):
                 suggested_area = parts[0].strip().title()
 
         return DeviceInfo(
-            identifiers={(DOMAIN, self._service_point_number)},
+            identifiers={(DOMAIN, f"{account_id}_{self._service_point_number}")},
             via_device=(DOMAIN, meter_data.account_id),
             serial_number=meter_number,
             name=name,

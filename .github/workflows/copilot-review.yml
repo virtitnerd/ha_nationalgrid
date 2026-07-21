@@ -1,0 +1,23 @@
+name: Request Copilot Review
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+
+permissions: {}
+
+jobs:
+  request-review:
+    name: Request Copilot review
+    runs-on: ubuntu-latest
+    if: >
+      !github.event.pull_request.draft &&
+      github.actor != 'dependabot[bot]'
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Add Copilot as reviewer
+        run: gh pr edit "$PR_URL" --add-reviewer Copilot
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

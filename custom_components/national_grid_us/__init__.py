@@ -306,5 +306,3 @@ async def async_unload_entry(
     ):
         hass.services.async_remove(DOMAIN, SERVICE_FORCE_REFRESH)
     return unload_ok
-
-

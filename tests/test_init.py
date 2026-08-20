@@ -295,7 +295,6 @@ async def test_scheduled_refresh_interval_only(
     coordinator.async_refresh_interval_only.assert_called_once()
 
 
-
 async def test_force_refresh_service_unknown_entry_id(
     hass: HomeAssistant, config_entry
 ) -> None:

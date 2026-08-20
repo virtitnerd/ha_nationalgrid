@@ -295,19 +295,6 @@ async def test_scheduled_refresh_interval_only(
     coordinator.async_refresh_interval_only.assert_called_once()
 
 
-async def test_async_reload_entry(hass: HomeAssistant, config_entry) -> None:
-    """Test async_reload_entry calls hass.config_entries.async_reload."""
-    from custom_components.national_grid_us import async_reload_entry
-
-    with patch.object(
-        hass.config_entries,
-        "async_reload",
-        new_callable=AsyncMock,
-    ) as mock_reload:
-        await async_reload_entry(hass, config_entry)
-
-    mock_reload.assert_called_once_with(config_entry.entry_id)
-
 
 async def test_force_refresh_service_unknown_entry_id(
     hass: HomeAssistant, config_entry

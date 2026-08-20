@@ -204,7 +204,6 @@ async def async_setup_entry(
         hass.async_create_task(async_import_all_statistics(hass, coordinator))
 
     entry.async_on_unload(coordinator.async_add_listener(_on_update))
-    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
     # Schedule updates at the 18th minute of every hour
     # - At 00:18 (midnight): Full refresh to sync with new Hourly data
@@ -309,9 +308,3 @@ async def async_unload_entry(
     return unload_ok
 
 
-async def async_reload_entry(
-    hass: HomeAssistant,
-    entry: NationalGridConfigEntry,
-) -> None:
-    """Reload config entry."""
-    await hass.config_entries.async_reload(entry.entry_id)

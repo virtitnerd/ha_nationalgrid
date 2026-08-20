@@ -76,10 +76,10 @@
                 "name": "Avg Cost per Unit"
             },
             "last_bill_utility_charges": {
-                "name": "Last Bill Utility Charges"
+                "name": "Last Bill Delivery Charges"
             },
             "last_bill_supplier_charges": {
-                "name": "Last Bill Supplier Charges"
+                "name": "Last Bill Supply Charges"
             },
             "last_bill_avg_daily_usage": {
                 "name": "Last Bill Avg Daily Usage"

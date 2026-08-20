@@ -9,10 +9,12 @@ select = [
 
 ignore = [
     "ANN401", # Dynamically typed expressions (typing.Any) are disallowed
+    "CPY001", # Missing copyright notice — no copyright policy in this project
     "D203", # no-blank-line-before-class (incompatible with formatter)
     "D213", # multi-line-summary-second-line (incompatible with formatter)
     "COM812", # incompatible with formatter
     "ISC001", # incompatible with formatter
+    "PLR0917", # Too many positional arguments — suppressed project-wide alongside PLR0913
 ]
 
 [lint.per-file-ignores]

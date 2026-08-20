@@ -273,77 +273,58 @@ def _make_meter_data_with_fuel(fuel_type: str) -> MeterData:
 
 
 def test_cost_per_unit_electric() -> None:
-    """Test cost per unit for electric meter blends last 3 matched months."""
+    """Test electric meter blends last 3 bill history records."""
     meter_data = _make_meter_data_with_fuel("Electric")
     coordinator = MagicMock()
-    coordinator.get_all_usages.return_value = [
-        {"usageYearMonth": 202503, "usageType": "TOTAL_KWH", "usage": 400.0},
-        {"usageYearMonth": 202502, "usageType": "TOTAL_KWH", "usage": 500.0},
-        {"usageYearMonth": 202501, "usageType": "TOTAL_KWH", "usage": 600.0},
-        {"usageYearMonth": 202412, "usageType": "TOTAL_KWH", "usage": 700.0},
+    # Records returned newest-first from the business portal.
+    coordinator.get_all_electric_bill_records.return_value = [
+        {"totalCharges": 80.0, "totalKwh": 400.0},
+        {"totalCharges": 100.0, "totalKwh": 500.0},
+        {"totalCharges": 120.0, "totalKwh": 600.0},
+        {"totalCharges": 140.0, "totalKwh": 700.0},
     ]
-    coordinator.get_all_costs.return_value = [
-        {"fuelType": "ELECTRIC", "date": "2025-03-01", "month": 3, "amount": 80.0},
-        {"fuelType": "ELECTRIC", "date": "2025-02-01", "month": 2, "amount": 100.0},
-        {"fuelType": "ELECTRIC", "date": "2025-01-01", "month": 1, "amount": 120.0},
-        {"fuelType": "ELECTRIC", "date": "2024-12-01", "month": 12, "amount": 140.0},
-    ]
-    # Window = 3 most recent: Mar, Feb, Jan
-    # total_cost = 80 + 100 + 120 = 300; total_usage = 400 + 500 + 600 = 1500
+    # Window = 3 most recent: 80+100+120=300, 400+500+600=1500
     result = _get_cost_per_unit(coordinator, meter_data)
     assert result == round(300.0 / 1500.0, 4)
 
 
 def test_cost_per_unit_gas() -> None:
-    """Test cost per unit for gas meter uses CCF unit."""
+    """Test gas meter uses totalTherms from bill history."""
     meter_data = _make_meter_data_with_fuel("Gas")
     coordinator = MagicMock()
-    coordinator.get_all_usages.return_value = [
-        {"usageYearMonth": 202501, "usageType": "THERMS", "usage": 50.0},
-    ]
-    coordinator.get_all_costs.return_value = [
-        {"fuelType": "GAS", "date": "2025-01-01", "month": 1, "amount": 75.0},
+    coordinator.get_all_gas_bill_records.return_value = [
+        {"totalCharges": 75.0, "totalTherms": 50.0},
     ]
     result = _get_cost_per_unit(coordinator, meter_data)
     assert result == round(75.0 / 50.0, 4)
 
 
-def test_cost_per_unit_year_boundary() -> None:
-    """Test that December (month=12) does not beat January of the following year."""
+def test_cost_per_unit_skips_zero_kwh() -> None:
+    """Test that periods with zero kWh (e.g. full net-metering months) are skipped."""
     meter_data = _make_meter_data_with_fuel("Electric")
     coordinator = MagicMock()
-    coordinator.get_all_usages.return_value = [
-        {"usageYearMonth": 202501, "usageType": "TOTAL_KWH", "usage": 500.0},
-        {"usageYearMonth": 202412, "usageType": "TOTAL_KWH", "usage": 700.0},
+    coordinator.get_all_electric_bill_records.return_value = [
+        {"totalCharges": 43.63, "totalKwh": 0.0},  # full net-metering month, skipped
+        {"totalCharges": 80.0, "totalKwh": 400.0},
+        {"totalCharges": 100.0, "totalKwh": 500.0},
     ]
-    coordinator.get_all_costs.return_value = [
-        {"fuelType": "ELECTRIC", "date": "2025-01-01", "month": 1, "amount": 100.0},
-        {"fuelType": "ELECTRIC", "date": "2024-12-01", "month": 12, "amount": 140.0},
-    ]
-    # Window = 2 (only 2 matched); Jan 2025 is most recent
+    # Zero-kWh record skipped; window = remaining 2 records
     result = _get_cost_per_unit(coordinator, meter_data)
-    assert result == round(240.0 / 1200.0, 4)
+    assert result == round(180.0 / 900.0, 4)
 
 
 def test_cost_per_unit_no_data_returns_zero() -> None:
-    """Test cost per unit returns 0.0 when no data is available."""
+    """Test cost per unit returns 0.0 when no bill history is available."""
     meter_data = _make_meter_data_with_fuel("Electric")
     coordinator = MagicMock()
-    coordinator.get_all_usages.return_value = []
-    coordinator.get_all_costs.return_value = []
+    coordinator.get_all_electric_bill_records.return_value = []
     assert _get_cost_per_unit(coordinator, meter_data) == 0.0
 
 
-def test_cost_per_unit_no_matching_months_returns_zero() -> None:
-    """Test cost per unit returns 0.0 when usages and costs don't share any month."""
-    meter_data = _make_meter_data_with_fuel("Electric")
+def test_cost_per_unit_unknown_fuel_returns_zero() -> None:
+    """Test cost per unit returns 0.0 for unknown fuel types."""
+    meter_data = _make_meter_data_with_fuel("Steam")
     coordinator = MagicMock()
-    coordinator.get_all_usages.return_value = [
-        {"usageYearMonth": 202503, "usageType": "TOTAL_KWH", "usage": 400.0},
-    ]
-    coordinator.get_all_costs.return_value = [
-        {"fuelType": "ELECTRIC", "date": "2025-01-01", "month": 1, "amount": 100.0},
-    ]
     assert _get_cost_per_unit(coordinator, meter_data) == 0.0
 
 

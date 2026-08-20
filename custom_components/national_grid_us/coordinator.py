@@ -932,6 +932,20 @@ class NationalGridDataUpdateCoordinator(
         records = self.data.gas_bill_history.get(account_id, [])
         return records[0] if records else None
 
+    def get_all_electric_bill_records(
+        self, account_id: str
+    ) -> list[ElectricBillRecord]:
+        """Return all electric bill history records for an account (newest-first)."""
+        if self.data is None:
+            return []
+        return list(self.data.electric_bill_history.get(account_id, []))
+
+    def get_all_gas_bill_records(self, account_id: str) -> list[GasBillRecord]:
+        """Return all gas bill history records for an account (newest-first)."""
+        if self.data is None:
+            return []
+        return list(self.data.gas_bill_history.get(account_id, []))
+
     def reset_to_first_refresh(self) -> None:
         """Reset the coordinator to perform a full historical data import.
 

@@ -94,41 +94,38 @@ def _get_cost_per_unit_unit(meter_data: MeterData) -> str:
 def _get_cost_per_unit(
     coordinator: NationalGridDataUpdateCoordinator, meter_data: MeterData
 ) -> float:
-    """Return blended rate (total cost ÷ total usage) over the last 3 matched months.
+    """Return blended rate over the last 3 billing periods from the business portal.
 
-    Returns 0.0 when no matched month pairs are available so Energy Dashboard
-    cost calculations remain functional.
+    Uses totalCharges / totalKwh (electric) or totalTherms (gas) from bill history,
+    which includes supply charges, unlike the GQL cost endpoint (delivery only).
+
+    Periods with zero usage (e.g. full net-metering months) are skipped.
+    Returns 0.0 when no valid periods are available.
     """
-    fuel_type = meter_data.meter.get("fuelType")
-    usages = coordinator.get_all_usages(meter_data.account_id, fuel_type)
-    costs = coordinator.get_all_costs(meter_data.account_id, fuel_type)
-    if not usages or not costs:
+    fuel_type = meter_data.meter.get("fuelType", "").lower()
+    account_id = meter_data.account_id
+
+    if fuel_type == "electric":
+        pairs = [
+            (r.get("totalCharges", 0.0), r.get("totalKwh", 0.0))
+            for r in coordinator.get_all_electric_bill_records(account_id)
+            if (r.get("totalKwh") or 0.0) > 0
+        ]
+    elif fuel_type == "gas":
+        pairs = [
+            (r.get("totalCharges", 0.0), r.get("totalTherms", 0.0))
+            for r in coordinator.get_all_gas_bill_records(account_id)
+            if (r.get("totalTherms") or 0.0) > 0
+        ]
+    else:
         return 0.0
 
-    # Build YYYYMM → cost amount lookup from the date field (month is 1-12 only).
-    cost_by_month: dict[int, float] = {}
-    for cost in costs:
-        date_str = cost.get("date", "")
-        if len(date_str) >= 7:  # noqa: PLR2004
-            yyyymm = int(date_str[:7].replace("-", ""))
-            cost_by_month[yyyymm] = cost.get("amount", 0.0)
-
-    # Collect months that have both a positive usage record and a cost record.
-    matched = sorted(
-        [
-            (u.get("usageYearMonth", 0), u.get("usage", 0.0))
-            for u in usages
-            if u.get("usageYearMonth", 0) in cost_by_month and u.get("usage", 0.0) > 0
-        ],
-        key=lambda x: x[0],
-        reverse=True,
-    )
-    if not matched:
+    if not pairs:
         return 0.0
 
-    window = matched[:_RATE_WINDOW]
-    total_cost = sum(cost_by_month[yyyymm] for yyyymm, _ in window)
-    total_usage = sum(usage for _, usage in window)
+    window = pairs[:_RATE_WINDOW]
+    total_cost = sum(c for c, _ in window)
+    total_usage = sum(u for _, u in window)
     if total_usage == 0:  # pragma: no cover
         return 0.0
     return round(total_cost / total_usage, 4)

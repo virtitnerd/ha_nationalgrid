@@ -1191,6 +1191,22 @@ async def test_get_latest_gas_bill_record_none_data(hass: HomeAssistant) -> None
     assert coordinator.get_latest_gas_bill_record(MOCK_ACCOUNT_ID) is None
 
 
+async def test_get_all_electric_bill_records_none_data(hass: HomeAssistant) -> None:
+    """Test get_all_electric_bill_records returns empty list when data is None."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = None
+    assert coordinator.get_all_electric_bill_records(MOCK_ACCOUNT_ID) == []
+
+
+async def test_get_all_gas_bill_records_none_data(hass: HomeAssistant) -> None:
+    """Test get_all_gas_bill_records returns empty list when data is None."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = None
+    assert coordinator.get_all_gas_bill_records(MOCK_ACCOUNT_ID) == []
+
+
 async def test_fetch_bill_history_skipped_without_customer_number(
     hass: HomeAssistant,
 ) -> None:

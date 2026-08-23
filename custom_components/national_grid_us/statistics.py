@@ -556,6 +556,25 @@ async def _get_last_statistic_start(hass: HomeAssistant, statistic_id: str) -> f
     return 0.0
 
 
+async def get_ami_last_covered_hour(
+    hass: HomeAssistant, service_point: str, account_id: str
+) -> datetime | None:
+    """Return the most recent hour the AMI hourly stat series already covers.
+
+    Used by the coordinator to size the interval-read fetch window so it
+    reaches back to where AMI coverage actually ends, instead of a fixed
+    lookback that leaves a gap when AMI publishing falls behind (AMI only
+    refreshes once daily, at midnight).
+    """
+    stat_id, *_ = _resolve_hourly_stat_info(
+        service_point, account_id, is_gas=False, return_only=False
+    )
+    last_ts = await _get_last_statistic_start(hass, stat_id)
+    if not last_ts:
+        return None
+    return datetime.fromtimestamp(last_ts, tz=UTC)
+
+
 async def _import_interval_stats(  # noqa: PLR0913
     hass: HomeAssistant,
     service_point: str,

@@ -14,6 +14,7 @@ from custom_components.national_grid_us.statistics import (
     _parse_ami_datetime,
     async_import_all_statistics,
     async_import_meter_statistics,
+    get_ami_last_covered_hour,
 )
 
 
@@ -494,6 +495,39 @@ async def test_import_interval_stats_excludes_ami_covered_hours(
     assert len(interval_calls) == 1
     imported_starts = {s["start"] for s in interval_calls[0][0][2]}
     assert ami_covered_hour not in imported_starts
+
+
+# ---------------------------------------------------------------------------
+# get_ami_last_covered_hour tests
+# ---------------------------------------------------------------------------
+
+
+@patch("custom_components.national_grid_us.statistics.get_instance")
+async def test_get_ami_last_covered_hour_returns_datetime(
+    mock_get_instance, hass
+) -> None:
+    """Test the AMI hourly stat's last hour is returned as a UTC datetime."""
+    stat_id = "national_grid_us:acct1_SP1_electric_hourly_usage"
+    last_hour_ts = (datetime.now(tz=UTC) - timedelta(hours=5)).timestamp()
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(
+        return_value={stat_id: [{"start": last_hour_ts, "sum": 5.0}]}
+    )
+
+    result = await get_ami_last_covered_hour(hass, "SP1", "acct1")
+
+    assert result == datetime.fromtimestamp(last_hour_ts, tz=UTC)
+
+
+@patch("custom_components.national_grid_us.statistics.get_instance")
+async def test_get_ami_last_covered_hour_returns_none_when_no_stats(
+    mock_get_instance, hass
+) -> None:
+    """Test None is returned when the AMI hourly stat has no rows yet."""
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
+
+    result = await get_ami_last_covered_hour(hass, "SP1", "acct1")
+
+    assert result is None
 
 
 # ---------------------------------------------------------------------------

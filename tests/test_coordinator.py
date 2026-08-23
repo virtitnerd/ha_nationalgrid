@@ -927,6 +927,105 @@ async def test_interval_reads_exception_is_logged(
     assert "Could not fetch interval reads for meter" in caplog.text
 
 
+async def test_interval_reads_widens_window_when_ami_behind(
+    hass: HomeAssistant,
+) -> None:
+    """Test the interval-read window widens when AMI is several days behind."""
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator._is_first_refresh = False
+
+    old_ami_hour = datetime.now(tz=UTC) - timedelta(days=3)
+    with patch(
+        "custom_components.national_grid_us.statistics.get_ami_last_covered_hour",
+        AsyncMock(return_value=old_ami_hour),
+    ):
+        await coordinator._async_update_data()
+
+    start_dt = api.get_interval_reads.call_args.kwargs["start_datetime"]
+    # Widened window should reach back well past the default 24h
+    assert (datetime.now() - start_dt) > timedelta(hours=36)  # noqa: DTZ005
+
+
+async def test_interval_reads_window_capped_at_max_lookback(
+    hass: HomeAssistant,
+) -> None:
+    """Test the widened window never exceeds _MAX_INTERVAL_LOOKBACK_DAYS."""
+    from custom_components.national_grid_us.coordinator import (
+        _MAX_INTERVAL_LOOKBACK_DAYS,
+    )
+
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator._is_first_refresh = False
+
+    very_old_ami_hour = datetime.now(tz=UTC) - timedelta(days=30)
+    with patch(
+        "custom_components.national_grid_us.statistics.get_ami_last_covered_hour",
+        AsyncMock(return_value=very_old_ami_hour),
+    ):
+        await coordinator._async_update_data()
+
+    start_dt = api.get_interval_reads.call_args.kwargs["start_datetime"]
+    age = datetime.now() - start_dt  # noqa: DTZ005
+    assert age <= timedelta(days=_MAX_INTERVAL_LOOKBACK_DAYS, hours=1)
+    assert age >= timedelta(days=_MAX_INTERVAL_LOOKBACK_DAYS - 1)
+
+
+async def test_interval_reads_widened_window_falls_back_on_error(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test a failed widened fetch retries with the default 24h window."""
+    api = _make_api()
+    api.get_interval_reads = AsyncMock(
+        side_effect=[CannotConnectError("timeout"), [{"startTime": "x", "value": 1}]]
+    )
+    coordinator = _make_coordinator(hass, api)
+    coordinator._is_first_refresh = False
+
+    old_ami_hour = datetime.now(tz=UTC) - timedelta(days=3)
+    with (
+        patch(
+            "custom_components.national_grid_us.statistics.get_ami_last_covered_hour",
+            AsyncMock(return_value=old_ami_hour),
+        ),
+        caplog.at_level(logging.INFO),
+    ):
+        data = await coordinator._async_update_data()
+
+    assert api.get_interval_reads.call_count == 2
+    assert "retrying with 24h fallback window" in caplog.text
+    assert data.interval_reads[MOCK_SERVICE_POINT] == [{"startTime": "x", "value": 1}]
+
+
+async def test_interval_reads_widened_window_fallback_also_fails(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test both the widened fetch and the 24h fallback failing is logged."""
+    api = _make_api()
+    api.get_interval_reads = AsyncMock(
+        side_effect=[
+            CannotConnectError("timeout"),
+            CannotConnectError("timeout again"),
+        ]
+    )
+    coordinator = _make_coordinator(hass, api)
+    coordinator._is_first_refresh = False
+
+    old_ami_hour = datetime.now(tz=UTC) - timedelta(days=3)
+    with (
+        patch(
+            "custom_components.national_grid_us.statistics.get_ami_last_covered_hour",
+            AsyncMock(return_value=old_ami_hour),
+        ),
+        caplog.at_level(logging.DEBUG),
+    ):
+        await coordinator._async_update_data()
+
+    assert api.get_interval_reads.call_count == 2
+    assert "Fallback interval-read fetch also failed" in caplog.text
+
+
 async def test_first_refresh_ami_uses_epoch(hass: HomeAssistant) -> None:
     """Test first refresh calls primary AMI method with epoch as date_from."""
     from datetime import date

@@ -445,6 +445,57 @@ async def test_import_interval_stats_no_data_within_window(
     assert len(interval_calls) == 0
 
 
+@patch("custom_components.national_grid_us.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid_us.statistics.get_instance")
+async def test_import_interval_stats_excludes_ami_covered_hours(
+    mock_get_instance, mock_add_stats, hass
+) -> None:
+    """Interval stats must not re-cover hours the AMI hourly series already has.
+
+    Regression test: AMI's recent-72h pass and the interval-read window
+    overlap in real usage, so without this bound the Energy dashboard would
+    double-count any hour both series report.
+    """
+    mock_get_instance.return_value.async_clear_statistics = MagicMock()
+
+    ami_stat_id = "national_grid_us:acct1_SP1_electric_hourly_usage"
+    ami_covered_hour = (datetime.now(tz=UTC) - timedelta(hours=3)).replace(
+        minute=0, second=0, microsecond=0
+    )
+
+    async def _executor_job(func):
+        stat_id = func.args[2]
+        if stat_id == ami_stat_id:
+            return {stat_id: [{"start": ami_covered_hour.timestamp(), "sum": 5.0}]}
+        return {}
+
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(
+        side_effect=_executor_job
+    )
+
+    reads = [
+        {"startTime": _recent_starttime(3), "value": 0.5},  # same hour as AMI, excluded
+        {"startTime": _recent_starttime(1), "value": 0.4},  # after AMI, included
+    ]
+    coordinator = MagicMock()
+    coordinator.data = _make_coordinator_data(
+        ami_usages={},
+        meters={"SP1": _make_meter_data("Electric")},
+    )
+    coordinator.data.interval_reads = {"SP1": reads}
+
+    await async_import_all_statistics(hass, coordinator)
+
+    interval_calls = [
+        c
+        for c in mock_add_stats.call_args_list
+        if "interval_usage" in c[0][1]["statistic_id"]
+    ]
+    assert len(interval_calls) == 1
+    imported_starts = {s["start"] for s in interval_calls[0][0][2]}
+    assert ami_covered_hour not in imported_starts
+
+
 # ---------------------------------------------------------------------------
 # _bucket_interval_reads tests
 # ---------------------------------------------------------------------------

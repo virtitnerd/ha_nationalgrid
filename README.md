@@ -184,7 +184,7 @@ All readings are aggregated into hourly buckets before being stored, as required
 The integration maintains **two separate stat series** per electric meter:
 
 - **Hourly AMI stats** — verified/settled data from the AMI GraphQL endpoint. Grows permanently; only new readings are appended.
-- **Interval stats** — near-real-time data from the REST interval endpoint, covering yesterday midnight through now. Cleared and reimported on every refresh; bridges the gap until AMI data catches up.
+- **Interval stats** — near-real-time data from the interval-reads endpoint. Cleared and reimported on every refresh, starting from whichever is later: yesterday midnight UTC, or the last hour AMI has already published. This keeps the two series from ever covering the same hour.
 
 Statistics IDs include the account ID and service point to ensure uniqueness across accounts.
 

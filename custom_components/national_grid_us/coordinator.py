@@ -599,13 +599,12 @@ class NationalGridDataUpdateCoordinator(
         """Fetch interval reads for a single electric meter.
 
         Uses the nrtEnergyUsages GraphQL endpoint (same source as the NG web
-        portal's Real-Time Usage view). The window normally reaches back 24
-        hours in local time, matching the portal. But AMI only refreshes once
-        daily (at midnight), so if AMI is running behind — its last covered
-        hour is older than 24h ago — the window is widened to reach back to
-        right where AMI coverage ends (capped at
-        _MAX_INTERVAL_LOOKBACK_DAYS), so interval reads bridge the whole gap
-        instead of leaving a hole in the Energy dashboard.
+        portal's Real-Time Usage view). The window always starts right where
+        the AMI hourly stat's coverage ends, so interval reads pick up
+        seamlessly from Hourly with no gap and no overlap (capped at
+        _MAX_INTERVAL_LOOKBACK_DAYS back, in case AMI has been down a long
+        time). Falls back to a 24h window — matching the portal's own
+        default — only when AMI has no stats yet (e.g. a fresh install).
 
         Gas meters are skipped.
         """
@@ -624,11 +623,10 @@ class NationalGridDataUpdateCoordinator(
         ami_last_hour = await get_ami_last_covered_hour(self.hass, sp, account_id)
         if ami_last_hour is not None:
             ami_last_hour_local = ami_last_hour.astimezone().replace(tzinfo=None)
-            if ami_last_hour_local < default_start:
-                max_lookback = datetime.now() - timedelta(  # noqa: DTZ005
-                    days=_MAX_INTERVAL_LOOKBACK_DAYS
-                )
-                start_dt = max(ami_last_hour_local, max_lookback)
+            max_lookback = datetime.now() - timedelta(  # noqa: DTZ005
+                days=_MAX_INTERVAL_LOOKBACK_DAYS
+            )
+            start_dt = max(ami_last_hour_local, max_lookback)
 
         try:
             reads = await self.api.get_interval_reads(
@@ -647,8 +645,8 @@ class NationalGridDataUpdateCoordinator(
                 )
                 return
             _LOGGER.info(
-                "Widened interval-read window (from %s) failed for meter %s: %s"
-                " — retrying with 24h fallback window",
+                "AMI-anchored interval-read window (from %s) failed for meter %s:"
+                " %s — retrying with 24h fallback window",
                 start_dt,
                 sp,
                 err,

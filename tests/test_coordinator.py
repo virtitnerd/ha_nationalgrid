@@ -947,6 +947,32 @@ async def test_interval_reads_widens_window_when_ami_behind(
     assert (datetime.now() - start_dt) > timedelta(hours=36)  # noqa: DTZ005
 
 
+async def test_interval_reads_narrows_window_when_ami_is_current(
+    hass: HomeAssistant,
+) -> None:
+    """Test the window anchors to AMI's last hour even when that's recent.
+
+    Interval reads should always pick up exactly where Hourly left off, not
+    just when Hourly is more than 24h behind — otherwise a still-current AMI
+    series and a fixed 24h interval window can each end up requesting/
+    reporting the same recent hours redundantly.
+    """
+    api = _make_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator._is_first_refresh = False
+
+    recent_ami_hour = datetime.now(tz=UTC) - timedelta(hours=2)
+    with patch(
+        "custom_components.national_grid_us.statistics.get_ami_last_covered_hour",
+        AsyncMock(return_value=recent_ami_hour),
+    ):
+        await coordinator._async_update_data()
+
+    start_dt = api.get_interval_reads.call_args.kwargs["start_datetime"]
+    # Window should narrow to ~2h back, not stay at the default 24h
+    assert (datetime.now() - start_dt) < timedelta(hours=6)  # noqa: DTZ005
+
+
 async def test_interval_reads_window_capped_at_max_lookback(
     hass: HomeAssistant,
 ) -> None:

@@ -174,7 +174,7 @@ A full data fetch including:
 
 A fast incremental fetch of near-real-time interval reads for electric meters:
 
-- Interval reads normally cover the last 24 hours in local time (nrtEnergyUsages GraphQL endpoint, matching the NG web portal's window). Since AMI hourly data only refreshes once daily (at midnight), the window automatically widens to reach back to wherever AMI coverage actually ends whenever that's more than 24h ago — capped at 7 days — so a delayed AMI publish never leaves a gap in the Energy dashboard. If a widened request fails, it falls back to the normal 24h window.
+- Interval reads (nrtEnergyUsages GraphQL endpoint) always start right where the AMI hourly stat's coverage ends, so the two series pick up from each other seamlessly with no gap and no overlap — capped at 7 days back as a safety bound. Falls back to a 24h window, matching the NG web portal's own default, only when AMI has no stats yet (e.g. a fresh install) or when the AMI-anchored request fails.
 - Interval statistics are **cleared and reimported** on every hourly refresh so provisional data never accumulates
 
 ## Long-Term Statistics

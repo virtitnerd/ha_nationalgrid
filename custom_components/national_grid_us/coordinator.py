@@ -41,6 +41,11 @@ if TYPE_CHECKING:
 # Truncate datetime strings to "YYYY-MM-DDTHH:MM" for log readability
 _DATETIME_LOG_LEN = 16
 
+# Cap how far back an interval-read fetch will reach to bridge an AMI gap,
+# even if AMI hasn't published in longer than this (safety bound on payload
+# size / request duration).
+_MAX_INTERVAL_LOOKBACK_DAYS = 7
+
 
 @dataclass
 class MeterData:
@@ -375,6 +380,7 @@ class NationalGridDataUpdateCoordinator(
         # In interval-only mode: skips slow GraphQL AMI fetch, does interval reads only.
         # In full mode: fetches both AMI 15-min data and interval reads.
         await self._fetch_ami_data(
+            account_id,
             billing_account,
             meter_nodes,
             today,
@@ -542,6 +548,7 @@ class NationalGridDataUpdateCoordinator(
 
     async def _fetch_ami_data(  # noqa: PLR0913
         self,
+        account_id: str,
         billing_account: BillingAccount,
         meter_nodes: list[Meter],
         today: date,
@@ -577,70 +584,113 @@ class NationalGridDataUpdateCoordinator(
                 )
 
             # Always fetch interval reads for electric meters (fast REST endpoint)
-            await self._fetch_interval_reads(meter, premise_number, sp, interval_reads)
+            await self._fetch_interval_reads(
+                meter, premise_number, sp, account_id, interval_reads
+            )
 
     async def _fetch_interval_reads(
         self,
         meter: Meter,
         premise_number: str,
         sp: str,
+        account_id: str,
         interval_reads: dict[str, list[IntervalRead]],
     ) -> None:
         """Fetch interval reads for a single electric meter.
 
-        The AMIAdapter REST API provides near-real-time 15-minute data.
-        Gas meters are skipped (the endpoint returns 404 for them).
-        Fetches from yesterday midnight UTC so interval reads pick up
-        seamlessly where hourly AMI data leaves off.
+        Uses the nrtEnergyUsages GraphQL endpoint (same source as the NG web
+        portal's Real-Time Usage view). The window always starts right where
+        the AMI hourly stat's coverage ends, so interval reads pick up
+        seamlessly from Hourly with no gap and no overlap (capped at
+        _MAX_INTERVAL_LOOKBACK_DAYS back, in case AMI has been down a long
+        time). Falls back to a 24h window — matching the portal's own
+        default — only when AMI has no stats yet (e.g. a fresh install).
+
+        Gas meters are skipped.
         """
         # Interval reads are for electric meters only.
         fuel_type = str(meter.get("fuelType", ""))
         if fuel_type == "Gas":
             return
 
-        try:
-            now = datetime.now(tz=UTC)
-            # Start from yesterday midnight UTC — interval covers yesterday through now,
-            # picking up where verified AMI data leaves off.
-            yesterday_midnight = (now - timedelta(days=1)).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
+        # Naive local time intentionally — the NG API expects the same local
+        # (no-offset) format the web portal sends, not UTC.
+        default_start = datetime.now() - timedelta(hours=24)  # noqa: DTZ005
+        start_dt = default_start
 
+        from .statistics import get_ami_last_covered_hour  # noqa: PLC0415
+
+        ami_last_hour = await get_ami_last_covered_hour(self.hass, sp, account_id)
+        if ami_last_hour is not None:
+            ami_last_hour_local = ami_last_hour.astimezone().replace(tzinfo=None)
+            max_lookback = datetime.now() - timedelta(  # noqa: DTZ005
+                days=_MAX_INTERVAL_LOOKBACK_DAYS
+            )
+            start_dt = max(ami_last_hour_local, max_lookback)
+
+        try:
             reads = await self.api.get_interval_reads(
                 premise_number=premise_number,
                 service_point_number=sp,
-                start_datetime=yesterday_midnight,
+                start_datetime=start_dt,
             )
-            interval_reads[sp] = reads
-
-            if reads:
-                times = [r.get("startTime") for r in reads if r.get("startTime")]
-                if times:
-                    min_t = min(times)
-                    max_t = max(times)
-                    _LOGGER.debug(
-                        "Fetched %s interval reads for meter %s (range: %s to %s)",
-                        len(reads),
-                        sp,
-                        min_t[:_DATETIME_LOG_LEN]
-                        if len(min_t) > _DATETIME_LOG_LEN
-                        else min_t,
-                        max_t[:_DATETIME_LOG_LEN]
-                        if len(max_t) > _DATETIME_LOG_LEN
-                        else max_t,
-                    )
-                else:
-                    _LOGGER.debug(
-                        "Fetched %s interval reads for meter %s", len(reads), sp
-                    )
-            else:
-                _LOGGER.debug("No interval reads returned for meter %s", sp)
         except (
             CannotConnectError,
             RetryExhaustedError,
             NationalGridError,
         ) as err:
-            _LOGGER.debug("Could not fetch interval reads for meter %s: %s", sp, err)
+            if start_dt == default_start:
+                _LOGGER.debug(
+                    "Could not fetch interval reads for meter %s: %s", sp, err
+                )
+                return
+            _LOGGER.info(
+                "AMI-anchored interval-read window (from %s) failed for meter %s:"
+                " %s — retrying with 24h fallback window",
+                start_dt,
+                sp,
+                err,
+            )
+            try:
+                reads = await self.api.get_interval_reads(
+                    premise_number=premise_number,
+                    service_point_number=sp,
+                    start_datetime=default_start,
+                )
+            except (
+                CannotConnectError,
+                RetryExhaustedError,
+                NationalGridError,
+            ) as err2:
+                _LOGGER.debug(
+                    "Fallback interval-read fetch also failed for meter %s: %s",
+                    sp,
+                    err2,
+                )
+                return
+
+        interval_reads[sp] = reads
+
+        if reads:
+            times = [r.get("startTime") for r in reads if r.get("startTime")]
+            if times:
+                min_t = min(times)
+                max_t = max(times)
+                _LOGGER.debug(
+                    "Fetched %s interval reads for meter %s (range: %s to %s)",
+                    len(reads),
+                    sp,
+                    min_t[:_DATETIME_LOG_LEN]
+                    if len(min_t) > _DATETIME_LOG_LEN
+                    else min_t,
+                    max_t[:_DATETIME_LOG_LEN]
+                    if len(max_t) > _DATETIME_LOG_LEN
+                    else max_t,
+                )
+            else:
+                _LOGGER.debug("Fetched %s interval reads for meter %s", len(reads), sp)
+        else:
+            _LOGGER.debug("No interval reads returned for meter %s", sp)
 
     async def _fetch_ami_graphql_data(  # noqa: PLR0913
         self,

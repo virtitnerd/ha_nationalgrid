@@ -515,9 +515,10 @@ async def _import_interval_stats_electric(
 ) -> None:
     """Import interval stats for electric meters, split by direction.
 
-    Interval stats cover from yesterday midnight UTC onward, bridging the gap
-    between verified AMI data (ending ~2 days ago) and real-time. Always
-    clears and reimports so stale provisional data never accumulates.
+    Interval stats bridge the gap between verified AMI data and real-time,
+    starting from whichever is later: yesterday midnight UTC, or the last
+    hour AMI has already published. Always clears and reimports so stale
+    provisional data never accumulates.
     """
     await _import_interval_stats(
         hass,
@@ -538,6 +539,42 @@ async def _import_interval_stats_electric(
         )
 
 
+async def _get_last_statistic_start(hass: HomeAssistant, statistic_id: str) -> float:
+    """Return the start timestamp of the most recent stat row, or 0 if none."""
+    last = await get_instance(hass).async_add_executor_job(
+        partial(
+            get_last_statistics,
+            hass,
+            1,
+            statistic_id,
+            convert_units=True,
+            types={"sum"},
+        )
+    )
+    if last.get(statistic_id):
+        return last[statistic_id][0].get("start") or 0.0
+    return 0.0
+
+
+async def get_ami_last_covered_hour(
+    hass: HomeAssistant, service_point: str, account_id: str
+) -> datetime | None:
+    """Return the most recent hour the AMI hourly stat series already covers.
+
+    Used by the coordinator to size the interval-read fetch window so it
+    reaches back to where AMI coverage actually ends, instead of a fixed
+    lookback that leaves a gap when AMI publishing falls behind (AMI only
+    refreshes once daily, at midnight).
+    """
+    stat_id, *_ = _resolve_hourly_stat_info(
+        service_point, account_id, is_gas=False, return_only=False
+    )
+    last_ts = await _get_last_statistic_start(hass, stat_id)
+    if not last_ts:
+        return None
+    return datetime.fromtimestamp(last_ts, tz=UTC)
+
+
 async def _import_interval_stats(  # noqa: PLR0913
     hass: HomeAssistant,
     service_point: str,
@@ -549,16 +586,24 @@ async def _import_interval_stats(  # noqa: PLR0913
 ) -> None:
     """Import 15-min interval stats for a single electric meter.
 
-    Always clears and reimports from yesterday midnight UTC. This covers the
+    Always clears and reimports from yesterday midnight UTC (or the last hour
+    AMI has already published, whichever is later). This covers the
     near-real-time window that verified AMI data does not yet include.
-    The stat series is separate from the hourly AMI series so the two
-    never overlap or corrupt each other.
+    The window is bounded against the AMI hourly stat's last imported hour so
+    the two series never cover the same hour and double-count in the Energy
+    dashboard.
     """
     now = datetime.now(tz=UTC)
     cutoff = (now - timedelta(days=1)).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
     cutoff_ts = cutoff.timestamp()
+
+    ami_stat_id, *_ = _resolve_hourly_stat_info(
+        service_point, account_id, is_gas=False, return_only=return_only
+    )
+    ami_last_ts = await _get_last_statistic_start(hass, ami_stat_id)
+    cutoff_ts = max(cutoff_ts, ami_last_ts)
 
     prefix = f"{account_id}_{service_point}"
     display = f"{account_id}-{service_point}"
@@ -572,9 +617,12 @@ async def _import_interval_stats(  # noqa: PLR0913
         stat_type = "consumption"
 
     _LOGGER.info(
-        "Interval %s: cutoff=%s, clearing and reimporting",
+        "Interval %s: cutoff=%s (AMI last hour=%s), clearing and reimporting",
         stat_type,
-        cutoff.strftime("%Y-%m-%d %H:%M UTC"),
+        datetime.fromtimestamp(cutoff_ts, tz=UTC).strftime("%Y-%m-%d %H:%M UTC"),
+        datetime.fromtimestamp(ami_last_ts, tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
+        if ami_last_ts
+        else "none",
     )
 
     # Clear existing stats then yield to event loop before writing new ones
@@ -630,8 +678,9 @@ def _bucket_interval_reads(
 ) -> dict[datetime, float]:
     """Bucket interval reads into top-of-hour totals.
 
-    Filters by direction (consumption vs return) and drops readings
-    older than cutoff_ts (yesterday midnight UTC).
+    Filters by direction (consumption vs return) and drops readings whose
+    hour is at or before cutoff_ts (age backstop or last AMI-covered hour,
+    whichever is later).
     """
     hourly_buckets: dict[datetime, float] = {}
     skipped_filtered = 0
@@ -660,7 +709,7 @@ def _bucket_interval_reads(
             continue
 
         hour_start = dt.replace(minute=0, second=0, microsecond=0)
-        if hour_start.timestamp() < cutoff_ts:
+        if hour_start.timestamp() <= cutoff_ts:
             skipped_old += 1
             continue
 

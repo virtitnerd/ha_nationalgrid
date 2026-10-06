@@ -705,17 +705,18 @@ class NationalGridDataUpdateCoordinator(
         """Fetch AMI data for a single meter using a two-pass strategy.
 
         Pass 1 — bulk history via get_ami_energy_usages() (daily/hourly endpoint):
-          First refresh: epoch → today-3d
-          Incremental:   today-7d → today-3d
-          Falls back to 50-day get_ami_energy_usages_15min() if the primary fails
-          entirely on first refresh.
+          First refresh: epoch → today-4d (inclusive)
+          Incremental:   today-7d → today-4d (inclusive)
+          Falls back to get_ami_energy_usages_15min() over the same range if
+          the primary fails entirely on first refresh.
 
         Pass 2 — recent 72 h via get_ami_energy_usages_15min():
           Always fetches today-3d → today at 15-min granularity so the most
           recent data is at full resolution. Errors are logged and skipped.
 
-        Both result lists are concatenated so statistics.py sees the complete
-        range; it buckets to top-of-hour regardless of source granularity.
+        The API includes both date bounds. Keep the ranges disjoint before
+        concatenating them: statistics.py sums records into hourly buckets
+        and cannot distinguish overlapping hourly and 15-minute readings.
         """
         meter_kwargs = {
             "meter_number": str(meter.get("meterNumber", "")),
@@ -726,13 +727,14 @@ class NationalGridDataUpdateCoordinator(
         }
 
         cutoff = today - timedelta(days=3)  # 72-hour boundary
+        bulk_end = cutoff - timedelta(days=1)
 
         if is_first_refresh:
             date_from = date(1970, 1, 1)
             _LOGGER.info(
                 "First refresh: fetching AMI epoch→%s (hourly) + %s→%s (15-min)"
                 " for meter %s",
-                cutoff,
+                bulk_end,
                 cutoff,
                 today,
                 sp,
@@ -743,7 +745,7 @@ class NationalGridDataUpdateCoordinator(
                 "Incremental: fetching AMI %s→%s (hourly) + %s→%s (15-min)"
                 " for meter %s",
                 date_from,
-                cutoff,
+                bulk_end,
                 cutoff,
                 today,
                 sp,
@@ -754,7 +756,7 @@ class NationalGridDataUpdateCoordinator(
         try:
             bulk_data = await self.api.get_ami_energy_usages(
                 date_from=date_from,
-                date_to=cutoff,
+                date_to=bulk_end,
                 **meter_kwargs,  # type: ignore[arg-type]
             )
         except (
@@ -763,17 +765,17 @@ class NationalGridDataUpdateCoordinator(
             NationalGridError,
         ) as err:
             if is_first_refresh:
-                # Primary method failed; retry with explicit 15-min, 50-day window.
+                # Primary method failed; retry the same range at 15-min resolution.
                 _LOGGER.warning(
                     "Primary AMI fetch failed for meter %s: %s"
-                    " — retrying with 15-min, 50-day window",
+                    " — retrying the same range at 15-min resolution",
                     sp,
                     err,
                 )
                 try:
                     bulk_data = await self.api.get_ami_energy_usages_15min(
                         date_from=date_from,
-                        date_to=cutoff,
+                        date_to=bulk_end,
                         **meter_kwargs,  # type: ignore[arg-type]
                     )
                 except (

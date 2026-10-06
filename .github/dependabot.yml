@@ -10,6 +10,12 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
+    groups:
+      # init, autobuild and analyze must always run the same CodeQL version, or
+      # the analysis fails with a config/version mismatch. Update them together.
+      codeql-action:
+        patterns:
+          - "github/codeql-action/*"
 
   - package-ecosystem: "pip"
     directory: "/"

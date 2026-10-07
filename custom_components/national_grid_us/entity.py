@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -12,6 +14,17 @@ from .coordinator import NationalGridDataUpdateCoordinator
 
 if TYPE_CHECKING:  # pragma: no cover
     from py_nationalgrid.models import BillingAccount, Meter
+
+
+def _core_supports_via_device_id() -> bool:
+    """Return True when this core takes ``via_device_id`` in ``DeviceInfo``.
+
+    Home Assistant 2026.8 added ``via_device_id`` (the registry id of the parent
+    device) and deprecated the ``via_device`` identifier tuple, which core removes
+    in 2027.8. Older cores reject unknown ``DeviceInfo`` keys, so the key is only
+    used where the running core declares it.
+    """
+    return "via_device_id" in DeviceInfo.__optional_keys__
 
 
 class NationalGridEntity(CoordinatorEntity[NationalGridDataUpdateCoordinator]):
@@ -87,9 +100,8 @@ class NationalGridEntity(CoordinatorEntity[NationalGridDataUpdateCoordinator]):
             if len(parts) >= 2:  # noqa: PLR2004
                 suggested_area = parts[0].strip().title()
 
-        return DeviceInfo(
+        device_info = DeviceInfo(
             identifiers={(DOMAIN, f"{account_id}_{self._service_point_number}")},
-            via_device=(DOMAIN, meter_data.account_id),
             serial_number=meter_number,
             name=name,
             manufacturer="National Grid",
@@ -97,6 +109,27 @@ class NationalGridEntity(CoordinatorEntity[NationalGridDataUpdateCoordinator]):
             configuration_url=config_url,
             suggested_area=suggested_area,
         )
+        self._link_account_device(device_info, account_id)
+        return device_info
+
+    def _link_account_device(self, device_info: DeviceInfo, account_id: str) -> None:
+        """Link the meter device to its account device.
+
+        The account device is pre-registered in ``async_setup_entry`` before the
+        platforms load, so its registry id is normally available here. The
+        identifier tuple remains the fallback for cores older than 2026.8 and for
+        the case where the account device is not registered yet.
+        """
+        if _core_supports_via_device_id():
+            hass = getattr(self.coordinator, "hass", None)
+            if isinstance(hass, HomeAssistant):
+                account_device = dr.async_get(hass).async_get_device(
+                    identifiers={(DOMAIN, account_id)}
+                )
+                if account_device is not None:
+                    device_info["via_device_id"] = account_device.id
+                    return
+        device_info["via_device"] = (DOMAIN, account_id)  # type: ignore[typeddict-unknown-key]
 
     @property
     def account_id(self) -> str | None:

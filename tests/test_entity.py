@@ -2,13 +2,25 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from custom_components.national_grid_us.coordinator import MeterData
 from custom_components.national_grid_us.entity import (
     NationalGridAccountEntity,
     NationalGridEntity,
 )
+
+
+@pytest.fixture(autouse=True)
+def account_device_lookup():
+    """Resolve the account device without a real device registry."""
+    with patch(
+        "custom_components.national_grid_us.entity.dr.async_get_device_id_by_identifier",
+        return_value="account-device-id",
+    ) as lookup:
+        yield lookup
 
 
 def _make_coordinator(meter_data: MeterData | None = None) -> MagicMock:
@@ -122,13 +134,17 @@ def test_entity_device_info_smart_meter_not_ami() -> None:
     assert "AMI" not in device_info["model"]
 
 
-def test_entity_device_info_via_device() -> None:
-    """Test that Meter device info includes via_device pointing to account."""
+def test_entity_device_info_via_device(account_device_lookup) -> None:
+    """Test that Meter device info links to the account device by id."""
     meter_data = _make_meter_data()
     coordinator = _make_coordinator(meter_data)
     entity = NationalGridEntity(coordinator, "SP1")
     device_info = entity._attr_device_info
-    assert device_info.get("via_device") == ("national_grid_us", "acct1")
+    assert device_info.get("via_device_id") == "account-device-id"
+    assert "via_device" not in device_info
+    account_device_lookup.assert_called_once_with(
+        coordinator.hass, ("national_grid_us", "acct1"), config_entry_id="test_entry"
+    )
 
 
 def test_entity_device_info_via_device_fallback() -> None:
@@ -136,7 +152,7 @@ def test_entity_device_info_via_device_fallback() -> None:
     coordinator = _make_coordinator(None)
     entity = NationalGridEntity(coordinator, "SP1")
     device_info = entity._attr_device_info
-    assert "via_device" not in device_info
+    assert "via_device_id" not in device_info
 
 
 def test_account_entity_device_info() -> None:

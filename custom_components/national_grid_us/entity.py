@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -89,7 +90,11 @@ class NationalGridEntity(CoordinatorEntity[NationalGridDataUpdateCoordinator]):
 
         return DeviceInfo(
             identifiers={(DOMAIN, f"{account_id}_{self._service_point_number}")},
-            via_device=(DOMAIN, meter_data.account_id),
+            via_device_id=dr.async_get_device_id_by_identifier(
+                self.coordinator.hass,
+                (DOMAIN, meter_data.account_id),
+                config_entry_id=self.coordinator.config_entry.entry_id,
+            ),
             serial_number=meter_number,
             name=name,
             manufacturer="National Grid",

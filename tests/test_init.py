@@ -439,8 +439,9 @@ async def test_setup_entry_runs_statistics_rename(hass: HomeAssistant) -> None:
     """Test async_setup_entry runs the statistics migrations on startup.
 
     Covers both the old national_grid -> national_grid_us rename (3 DELETEs +
-    1 UPDATE) and the gas CCF -> therm cleanup (2 DELETEs + 1 DELETE), for
-    7 execute calls total across the two migrations' own sessions.
+    1 UPDATE) and the gas CCF -> therm cleanup (1 SELECT of stale ids, then
+    the recorder's own clear task), for 5 execute calls across the two
+    migrations' own sessions.
     """
     # Use version=2 so async_migrate_entry is NOT triggered; only
     # async_setup_entry's two migrations run.
@@ -459,6 +460,9 @@ async def test_setup_entry_runs_statistics_rename(hass: HomeAssistant) -> None:
     mock_instance = MagicMock()
     execute_result = MagicMock()
     execute_result.rowcount = 2
+    execute_result.__iter__.side_effect = lambda: iter(
+        [("national_grid_us:acct_100_gas_hourly_usage",)]
+    )
     session = mock_instance.get_session.return_value.__enter__.return_value
     session.execute.return_value = execute_result
     # async_add_executor_job must actually call the function; a plain MagicMock
@@ -480,9 +484,14 @@ async def test_setup_entry_runs_statistics_rename(hass: HomeAssistant) -> None:
         await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.LOADED
-    # v1->v2 rename: 3 DELETEs + 1 UPDATE. Gas CCF->therm cleanup: 3 DELETEs.
-    assert session.execute.call_count == 7
-    assert session.commit.call_count == 2
+    # v1->v2 rename: 3 DELETEs + 1 UPDATE. Gas CCF->therm cleanup: 1 SELECT.
+    assert session.execute.call_count == 5
+    assert session.commit.call_count == 1
+    # Stale series are cleared through the recorder so its metadata cache is
+    # dropped too; raw DELETEs left it pointing at removed rows.
+    mock_instance.async_clear_statistics.assert_called_once_with(
+        ["national_grid_us:acct_100_gas_hourly_usage"]
+    )
 
 
 async def test_warn_if_old_component_present(

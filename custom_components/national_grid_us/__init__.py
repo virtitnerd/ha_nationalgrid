@@ -140,45 +140,35 @@ async def _async_migrate_gas_ccf_to_therm(hass: HomeAssistant) -> None:
         _LOGGER.debug("Recorder not available — skipping gas unit migration")
         return
 
-    _STALE_META_SUBQ = (  # noqa: N806
-        "SELECT id FROM statistics_meta "
-        "WHERE source = 'national_grid_us' "
-        "AND statistic_id LIKE 'national_grid_us:%_gas_hourly_usage' "
-        "AND unit_of_measurement = 'CCF'"
-    )
-    _DELETE_STATS_SQL = (  # noqa: N806
-        f"DELETE FROM statistics WHERE metadata_id IN ({_STALE_META_SUBQ})"  # noqa: S608
-    )
-    _DELETE_SHORT_TERM_SQL = (  # noqa: N806
-        "DELETE FROM statistics_short_term "  # noqa: S608
-        f"WHERE metadata_id IN ({_STALE_META_SUBQ})"
-    )
-    _DELETE_META_SQL = (  # noqa: N806
-        "DELETE FROM statistics_meta "
+    _SELECT_STALE_SQL = (  # noqa: N806
+        "SELECT statistic_id FROM statistics_meta "
         "WHERE source = 'national_grid_us' "
         "AND statistic_id LIKE 'national_grid_us:%_gas_hourly_usage' "
         "AND unit_of_measurement = 'CCF'"
     )
 
-    def _clear() -> int:
+    def _find_stale() -> list[str]:
         with instance.get_session() as session:
-            session.execute(sa_text(_DELETE_STATS_SQL))
-            session.execute(sa_text(_DELETE_SHORT_TERM_SQL))
-            result = session.execute(sa_text(_DELETE_META_SQL))
-            session.commit()
-            return result.rowcount  # type: ignore[attr-defined]
+            return [row[0] for row in session.execute(sa_text(_SELECT_STALE_SQL))]
 
     try:
-        count = await instance.async_add_executor_job(_clear)
+        stale_ids = await instance.async_add_executor_job(_find_stale)
     except Exception as err:  # noqa: BLE001
         _LOGGER.warning("Gas unit migration encountered an error: %s", err)
         return
 
-    if count:
-        _LOGGER.info(
-            "Cleared %d CCF-labeled gas statistic series for reimport as therms",
-            count,
-        )
+    if not stale_ids:
+        return
+
+    # Use the recorder's own clear task rather than raw DELETEs: it also drops
+    # the recorder's cached metadata ids, which would otherwise point at the
+    # deleted rows and fail the reimport with a foreign key error. Tasks run in
+    # queue order, so this finishes before the reimport queued after it.
+    instance.async_clear_statistics(stale_ids)
+    _LOGGER.info(
+        "Cleared %d CCF-labeled gas statistic series for reimport as therms",
+        len(stale_ids),
+    )
 
 
 def _warn_if_old_component_present(hass: HomeAssistant) -> None:

@@ -46,6 +46,3 @@ jobs:
         uses: hacs/action@main
         with:
           category: integration
-          # Remove this 'ignore' key when brand images have been submitted to
-          # https://github.com/home-assistant/brands
-          ignore: brands

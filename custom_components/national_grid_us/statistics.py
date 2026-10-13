@@ -516,9 +516,9 @@ async def _import_interval_stats_electric(
     """Import interval stats for electric meters, split by direction.
 
     Interval stats bridge the gap between verified AMI data and real-time,
-    starting from whichever is later: yesterday midnight UTC, or the last
-    hour AMI has already published. Always clears and reimports so stale
-    provisional data never accumulates.
+    starting at the hour after the last hour AMI has already published (or
+    yesterday midnight UTC when AMI has no stats yet). Always clears and
+    reimports so stale provisional data never accumulates.
     """
     await _import_interval_stats(
         hass,
@@ -586,24 +586,36 @@ async def _import_interval_stats(  # noqa: PLR0913
 ) -> None:
     """Import 15-min interval stats for a single electric meter.
 
-    Always clears and reimports from yesterday midnight UTC (or the last hour
-    AMI has already published, whichever is later). This covers the
-    near-real-time window that verified AMI data does not yet include.
-    The window is bounded against the AMI hourly stat's last imported hour so
-    the two series never cover the same hour and double-count in the Energy
-    dashboard.
+    Always clears and reimports from the hour after the last hour AMI has
+    already published. This covers the near-real-time window that verified AMI
+    data does not yet include, and joins the two series with no gap and no
+    overlap, so nothing is double-counted in the Energy dashboard. Only when
+    AMI has no stats yet does the window start at yesterday midnight UTC.
     """
-    now = datetime.now(tz=UTC)
-    cutoff = (now - timedelta(days=1)).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
-    cutoff_ts = cutoff.timestamp()
-
     ami_stat_id, *_ = _resolve_hourly_stat_info(
         service_point, account_id, is_gas=False, return_only=return_only
     )
     ami_last_ts = await _get_last_statistic_start(hass, ami_stat_id)
-    cutoff_ts = max(cutoff_ts, ami_last_ts)
+    if not ami_last_ts and return_only:
+        # No AMI return series yet. The interval fetch starts at the last AMI
+        # consumption hour, so anchor there instead of cutting the window.
+        consumption_stat_id, *_ = _resolve_hourly_stat_info(
+            service_point, account_id, is_gas=False, return_only=False
+        )
+        ami_last_ts = await _get_last_statistic_start(hass, consumption_stat_id)
+
+    if ami_last_ts:
+        # Pick up at the hour after the last verified AMI hour, which is also
+        # where the interval fetch window starts.
+        cutoff_ts = ami_last_ts
+    else:
+        # No AMI stats yet (e.g. a fresh install): start at yesterday midnight
+        # UTC. Readings at or before the cutoff are dropped, so use the hour
+        # before to keep the midnight hour itself.
+        yesterday_midnight = (datetime.now(tz=UTC) - timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        cutoff_ts = (yesterday_midnight - timedelta(hours=1)).timestamp()
 
     prefix = f"{account_id}_{service_point}"
     display = f"{account_id}-{service_point}"
@@ -679,8 +691,8 @@ def _bucket_interval_reads(
     """Bucket interval reads into top-of-hour totals.
 
     Filters by direction (consumption vs return) and drops readings whose
-    hour is at or before cutoff_ts (age backstop or last AMI-covered hour,
-    whichever is later).
+    hour is at or before cutoff_ts (the last AMI-covered hour, or the hour
+    before yesterday midnight UTC when AMI has no stats yet).
     """
     hourly_buckets: dict[datetime, float] = {}
     skipped_filtered = 0

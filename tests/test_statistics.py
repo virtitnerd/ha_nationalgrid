@@ -11,6 +11,7 @@ from custom_components.national_grid_us.coordinator import (
 )
 from custom_components.national_grid_us.statistics import (
     _bucket_interval_reads,
+    _import_interval_stats_electric,
     _parse_ami_datetime,
     async_import_all_statistics,
     async_import_meter_statistics,
@@ -495,6 +496,127 @@ async def test_import_interval_stats_excludes_ami_covered_hours(
     assert len(interval_calls) == 1
     imported_starts = {s["start"] for s in interval_calls[0][0][2]}
     assert ami_covered_hour not in imported_starts
+
+
+def _hourly_reads(first: datetime, last: datetime, value: float = 1.0) -> list[dict]:
+    """Return one interval read per hour from first to last, inclusive."""
+    reads = []
+    hour = first
+    while hour <= last:
+        reads.append(
+            {"startTime": hour.strftime("%Y-%m-%dT%H:%M:%S+00:00"), "value": value}
+        )
+        hour += timedelta(hours=1)
+    return reads
+
+
+def _mock_ami_last_hours(mock_get_instance, last_by_stat_id: dict) -> None:
+    """Make the recorder report the given last AMI hour for each stat id."""
+    mock_get_instance.return_value.async_clear_statistics = MagicMock()
+
+    async def _executor_job(func):
+        stat_id = func.args[2]
+        if stat_id in last_by_stat_id:
+            start = last_by_stat_id[stat_id].timestamp()
+            return {stat_id: [{"start": start, "sum": 5.0}]}
+        return {}
+
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(
+        side_effect=_executor_job
+    )
+
+
+def _interval_starts(mock_add_stats, suffix: str) -> list[datetime]:
+    """Return the start of every stat imported for the given interval series."""
+    calls = [
+        c
+        for c in mock_add_stats.call_args_list
+        if c[0][1]["statistic_id"].endswith(suffix)
+    ]
+    assert len(calls) == 1
+    return [s["start"] for s in calls[0][0][2]]
+
+
+@patch("custom_components.national_grid_us.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid_us.statistics.get_instance")
+async def test_import_interval_stats_starts_after_last_ami_hour(
+    mock_get_instance, mock_add_stats, hass, freezer
+) -> None:
+    """Interval stats join the AMI series even when it lags past yesterday midnight.
+
+    Regression test for #94: AMI usually publishes 1-2 days late, so its last
+    hour is older than yesterday 00:00 UTC. The hours in between were fetched
+    and then dropped by an older midnight floor, leaving a gap in both series.
+    """
+    freezer.move_to("2026-10-13 12:30:00+00:00")
+    ami_last = datetime(2026, 10, 10, 20, tzinfo=UTC)
+    _mock_ami_last_hours(
+        mock_get_instance,
+        {"national_grid_us:acct1_SP1_electric_hourly_usage": ami_last},
+    )
+
+    last_read = datetime(2026, 10, 13, 11, tzinfo=UTC)
+    reads = _hourly_reads(ami_last, last_read)
+
+    await _import_interval_stats_electric(hass, "SP1", "acct1", reads)
+
+    starts = _interval_starts(mock_add_stats, "_electric_interval_usage")
+    # The AMI hour itself is covered by AMI, so it is not imported again
+    assert starts[0] == ami_last + timedelta(hours=1)
+    assert starts[-1] == last_read
+    # 3h on Oct 10, all of Oct 11 and Oct 12, then 12h on Oct 13: no gaps
+    assert len(starts) == 3 + 24 + 24 + 12
+
+
+@patch("custom_components.national_grid_us.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid_us.statistics.get_instance")
+async def test_import_interval_stats_without_ami_starts_at_yesterday_midnight(
+    mock_get_instance, mock_add_stats, hass, freezer
+) -> None:
+    """With no AMI stats yet, the window starts at yesterday 00:00 UTC inclusive."""
+    freezer.move_to("2026-10-13 12:30:00+00:00")
+    _mock_ami_last_hours(mock_get_instance, {})
+
+    reads = _hourly_reads(
+        datetime(2026, 10, 11, 22, tzinfo=UTC), datetime(2026, 10, 13, 11, tzinfo=UTC)
+    )
+
+    await _import_interval_stats_electric(hass, "SP1", "acct1", reads)
+
+    starts = _interval_starts(mock_add_stats, "_electric_interval_usage")
+    assert starts[0] == datetime(2026, 10, 12, 0, tzinfo=UTC)
+
+
+@patch("custom_components.national_grid_us.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid_us.statistics.get_instance")
+async def test_import_interval_return_stats_use_consumption_anchor(
+    mock_get_instance, mock_add_stats, hass, freezer
+) -> None:
+    """Return stats line up with the fetch window when AMI has no return series.
+
+    The interval fetch starts at the last AMI consumption hour, so a return
+    series without its own AMI stat must not be cut off any later than that.
+    """
+    freezer.move_to("2026-10-13 12:30:00+00:00")
+    ami_last = datetime(2026, 10, 10, 20, tzinfo=UTC)
+    _mock_ami_last_hours(
+        mock_get_instance,
+        {"national_grid_us:acct1_SP1_electric_hourly_usage": ami_last},
+    )
+
+    reads = [
+        {"startTime": "2026-10-10T20:00:00+00:00", "value": -0.1},  # AMI hour
+        {"startTime": "2026-10-11T05:00:00+00:00", "value": -0.3},
+        {"startTime": "2026-10-12T05:00:00+00:00", "value": -0.2},
+    ]
+
+    await _import_interval_stats_electric(hass, "SP1", "acct1", reads)
+
+    starts = _interval_starts(mock_add_stats, "_electric_interval_return_usage")
+    assert starts == [
+        datetime(2026, 10, 11, 5, tzinfo=UTC),
+        datetime(2026, 10, 12, 5, tzinfo=UTC),
+    ]
 
 
 # ---------------------------------------------------------------------------

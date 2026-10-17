@@ -863,3 +863,174 @@ async def test_import_all_statistics_skips_interval_reads_with_unknown_sp(hass) 
     ) as mock_add:
         await async_import_all_statistics(hass, coordinator)
         assert not mock_add.called
+
+
+def _make_billed_coordinator(
+    *,
+    meters: dict,
+    gas_bills: list | None = None,
+    electric_bills: list | None = None,
+) -> MagicMock:
+    coordinator = MagicMock()
+    coordinator.data = _make_coordinator_data(meters=meters)
+    coordinator.data.gas_bill_history = {"acct1": gas_bills or []}
+    coordinator.data.electric_bill_history = {"acct1": electric_bills or []}
+    return coordinator
+
+
+def _make_non_ami_meter(fuel_type: str, sp: str = "SP1") -> MeterData:
+    return MeterData(
+        account_id="acct1",
+        meter={
+            "fuelType": fuel_type,
+            "servicePointNumber": sp,
+            "hasAmiSmartMeter": False,
+        },
+        billing_account={"billingAccountId": "acct1"},
+    )
+
+
+def _gas_bill(read_from: str, read: str, therms: float, charges: float) -> dict:
+    return {
+        "readFromDate": read_from,
+        "readDate": read,
+        "totalTherms": therms,
+        "totalCharges": charges,
+    }
+
+
+@patch("custom_components.national_grid_us.statistics._THERM_SUPPORTED", new=True)
+@patch("custom_components.national_grid_us.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid_us.statistics.get_instance")
+async def test_import_billed_stats_gas(mock_get_instance, mock_add_stats, hass) -> None:
+    """Test non-AMI gas bills are spread evenly over their billing periods."""
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
+    coordinator = _make_billed_coordinator(
+        meters={"SP1": _make_non_ami_meter("Gas")},
+        gas_bills=[
+            _gas_bill("2025-02-05T00:00:00", "2025-03-07T00:00:00", 30.0, 60.0),
+            _gas_bill("2025-01-06", "2025-02-05", 60.0, 90.0),
+            _gas_bill("bad", "2025-01-06", 5.0, 5.0),
+        ],
+    )
+
+    await async_import_all_statistics(hass, coordinator)
+
+    calls = {c[0][1]["statistic_id"]: c[0] for c in mock_add_stats.call_args_list}
+    usage_meta, usage_stats = calls["national_grid_us:acct1_sp1_gas_billed_usage"][1:]
+    assert usage_meta["unit_of_measurement"] == "thm"
+    assert usage_meta["unit_class"] == "energy"
+    assert len(usage_stats) == 30 + 30
+    assert usage_stats[0]["start"].date().isoformat() == "2025-01-06"
+    assert usage_stats[0]["state"] == 2.0
+    assert usage_stats[-1]["start"].date().isoformat() == "2025-03-06"
+    assert usage_stats[-1]["state"] == 1.0
+    assert usage_stats[-1]["sum"] == 90.0
+
+    cost_meta, cost_stats = calls["national_grid_us:acct1_sp1_gas_billed_cost"][1:]
+    assert cost_meta["unit_of_measurement"] is None
+    assert cost_meta["unit_class"] is None
+    assert cost_stats[-1]["sum"] == 150.0
+
+
+@patch("custom_components.national_grid_us.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid_us.statistics.get_instance")
+async def test_import_billed_stats_continues_sum(
+    mock_get_instance, mock_add_stats, hass
+) -> None:
+    """Test the billed window continues from the last sum before it."""
+    sid = "national_grid_us:acct1_sp1_electric_billed_usage"
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(
+        return_value={sid: [{"sum": 50.0}, {"sum": 100.0}]}
+    )
+    coordinator = _make_billed_coordinator(
+        meters={"SP1": _make_non_ami_meter("Electric")},
+        electric_bills=[
+            {
+                "readFromDate": "2025-04-01",
+                "readDate": "2025-04-11",
+                "totalKwh": 100.0,
+                "totalCharges": 20.0,
+            }
+        ],
+    )
+
+    await async_import_all_statistics(hass, coordinator)
+
+    calls = {c[0][1]["statistic_id"]: c[0][2] for c in mock_add_stats.call_args_list}
+    assert calls[sid][0]["sum"] == 110.0
+    assert calls[sid][-1]["sum"] == 200.0
+
+
+@patch("custom_components.national_grid_us.statistics._THERM_SUPPORTED", new=True)
+@patch("custom_components.national_grid_us.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid_us.statistics.get_instance")
+async def test_import_billed_stats_skips_future_days(
+    mock_get_instance, mock_add_stats, hass, freezer
+) -> None:
+    """Test days that have not started yet are not imported."""
+    freezer.move_to("2025-03-10 20:00:00+00:00")
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
+    coordinator = _make_billed_coordinator(
+        meters={"SP1": _make_non_ami_meter("Gas")},
+        gas_bills=[
+            _gas_bill("2025-03-01", "2025-03-21", 20.0, 10.0),
+            _gas_bill("2025-04-01", "2025-04-11", 10.0, 5.0),
+        ],
+    )
+
+    await async_import_all_statistics(hass, coordinator)
+
+    stats = mock_add_stats.call_args_list[-1][0][2]
+    assert len(stats) == 10
+    assert stats[-1]["sum"] == 10.0
+
+
+@patch("custom_components.national_grid_us.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid_us.statistics.get_instance")
+async def test_import_billed_stats_skips_ami_and_ambiguous_meters(
+    mock_get_instance, mock_add_stats, hass
+) -> None:
+    """Test AMI meters and several non-AMI meters of one fuel are skipped."""
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
+    ami_meter = _make_non_ami_meter("Electric", "SP3")
+    ami_meter.meter["hasAmiSmartMeter"] = True
+    coordinator = _make_billed_coordinator(
+        meters={
+            "SP1": _make_non_ami_meter("Gas", "SP1"),
+            "SP2": _make_non_ami_meter("Gas", "SP2"),
+            "SP3": ami_meter,
+        },
+        gas_bills=[_gas_bill("2025-01-06", "2025-02-05", 60.0, 90.0)],
+        electric_bills=[
+            {
+                "readFromDate": "2025-01-06",
+                "readDate": "2025-02-05",
+                "totalKwh": 500.0,
+                "totalCharges": 100.0,
+            }
+        ],
+    )
+
+    await async_import_all_statistics(hass, coordinator)
+
+    assert not mock_add_stats.called
+
+
+@patch("custom_components.national_grid_us.statistics._THERM_SUPPORTED", new=False)
+@patch("custom_components.national_grid_us.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid_us.statistics.get_instance")
+async def test_import_billed_stats_gas_without_therm_unit(
+    mock_get_instance, mock_add_stats, hass
+) -> None:
+    """Test gas usage is skipped (cost still imported) when therms are unsupported."""
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
+    coordinator = _make_billed_coordinator(
+        meters={"SP1": _make_non_ami_meter("Gas")},
+        gas_bills=[_gas_bill("2025-01-06", "2025-02-05", 60.0, 90.0)],
+    )
+
+    await async_import_all_statistics(hass, coordinator)
+
+    ids = [c[0][1]["statistic_id"] for c in mock_add_stats.call_args_list]
+    assert ids == ["national_grid_us:acct1_sp1_gas_billed_cost"]

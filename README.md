@@ -203,6 +203,19 @@ Statistics IDs include the account ID and service point to ensure uniqueness acr
 | -------------------------------------------------- | --------------------- | -------- |
 | `national_grid_us:{account_id}_{sp}_gas_hourly_usage` | Gas consumption (CCF) | All available history |
 
+### Meters Without a Smart Meter
+
+Meters whose **Smart Meter** binary sensor is off have no hourly data. For these, billed usage and cost from your bill history (about two years) are imported instead, spread evenly across each billing period's days. Bill totals are exact; daily values are estimates.
+
+| Statistic ID                                              | Description                 |
+| --------------------------------------------------------- | --------------------------- |
+| `national_grid_us:{account_id}_{sp}_electric_billed_usage` | Billed consumption (kWh)    |
+| `national_grid_us:{account_id}_{sp}_electric_billed_cost`  | Billed cost (USD)           |
+| `national_grid_us:{account_id}_{sp}_gas_billed_usage`      | Billed consumption (therms) |
+| `national_grid_us:{account_id}_{sp}_gas_billed_cost`       | Billed cost (USD)           |
+
+Use the cost statistic with **Use an entity tracking the total costs**. Gas billed usage needs a Home Assistant release with the therm energy unit; on older releases only the cost is imported. Billed statistics are skipped for an account with more than one non-smart meter of the same fuel, since National Grid reports bill history per account.
+
 > **Note**: `{account_id}` is your billing account number and `{sp}` is your meter's service point number. Both can be found in the device info for your meter in Home Assistant (e.g., `national_grid_us:1234567890_SP001_electric_hourly_usage`).
 
 ### Energy Dashboard Setup

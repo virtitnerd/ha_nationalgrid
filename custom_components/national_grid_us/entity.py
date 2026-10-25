@@ -123,9 +123,15 @@ class NationalGridEntity(CoordinatorEntity[NationalGridDataUpdateCoordinator]):
         if _core_supports_via_device_id():
             hass = getattr(self.coordinator, "hass", None)
             if isinstance(hass, HomeAssistant):
-                account_device = dr.async_get(hass).async_get_device(
-                    identifiers={(DOMAIN, account_id)}
-                )
+                registry = dr.async_get(hass)
+                identifier = (DOMAIN, account_id)
+                # Newer cores deprecate async_get_device in favor of this lookup
+                if hasattr(registry, "async_get_device_by_identifier"):
+                    account_device = registry.async_get_device_by_identifier(
+                        identifier, self.coordinator.config_entry.entry_id
+                    )
+                else:
+                    account_device = registry.async_get_device(identifiers={identifier})
                 if account_device is not None:
                     device_info["via_device_id"] = account_device.id
                     return

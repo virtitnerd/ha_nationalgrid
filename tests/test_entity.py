@@ -144,6 +144,28 @@ async def test_entity_device_info_via_device_id(hass: HomeAssistant) -> None:
     account_device = _register_account_device(hass, "acct1")
     coordinator = _make_coordinator(_make_meter_data())
     coordinator.hass = hass
+    coordinator.config_entry.entry_id = account_device.config_entry_id
+    entity = NationalGridEntity(coordinator, "SP1")
+    device_info = entity._attr_device_info
+    assert device_info.get("via_device_id") == account_device.id
+    assert "via_device" not in device_info
+
+
+async def test_entity_device_info_via_device_id_with_legacy_lookup(
+    hass: HomeAssistant, monkeypatch
+) -> None:
+    """Test cores whose registry lacks async_get_device_by_identifier still link."""
+    account_device = _register_account_device(hass, "acct1")
+
+    class _LegacyRegistry:
+        """A registry that only has the older async_get_device lookup."""
+
+        def async_get_device(self, identifiers: set[tuple[str, str]]):  # noqa: ARG002
+            return account_device
+
+    monkeypatch.setattr(dr, "async_get", lambda _hass: _LegacyRegistry())
+    coordinator = _make_coordinator(_make_meter_data())
+    coordinator.hass = hass
     entity = NationalGridEntity(coordinator, "SP1")
     device_info = entity._attr_device_info
     assert device_info.get("via_device_id") == account_device.id

@@ -47,6 +47,16 @@ _DATETIME_LOG_LEN = 16
 _MAX_INTERVAL_LOOKBACK_DAYS = 7
 
 
+def meter_key(account_id: str, service_point: str) -> str:
+    """Return the coordinator key for a meter.
+
+    Service point numbers are only unique within a billing account (National
+    Grid commonly assigns "100"/"200" on every account), so meters are keyed
+    by account and service point together.
+    """
+    return f"{account_id}_{service_point}"
+
+
 @dataclass
 class MeterData:
     """Data for a single meter."""
@@ -54,6 +64,17 @@ class MeterData:
     meter: Meter
     account_id: str
     billing_account: BillingAccount
+    service_point: str = ""
+
+    def __post_init__(self) -> None:
+        """Default the service point from the meter payload."""
+        if not self.service_point:
+            self.service_point = str(self.meter.get("servicePointNumber") or "")
+
+    @property
+    def key(self) -> str:
+        """Return the coordinator key for this meter."""
+        return meter_key(self.account_id, self.service_point)
 
 
 @dataclass
@@ -347,10 +368,11 @@ class NationalGridDataUpdateCoordinator(
         for meter in meter_nodes:
             service_point = str(meter.get("servicePointNumber") or "")
             if service_point:
-                meters[service_point] = MeterData(
+                meters[meter_key(account_id, service_point)] = MeterData(
                     meter=meter,
                     account_id=account_id,
                     billing_account=billing_account,
+                    service_point=service_point,
                 )
                 _LOGGER.debug(
                     "Found meter: service_point=%s, fuel_type=%s",
@@ -580,6 +602,7 @@ class NationalGridDataUpdateCoordinator(
                     sp,
                     today,
                     ami_usages,
+                    key=meter_key(account_id, sp),
                     is_first_refresh=is_first_refresh,
                 )
 
@@ -669,7 +692,7 @@ class NationalGridDataUpdateCoordinator(
                 )
                 return
 
-        interval_reads[sp] = reads
+        interval_reads[meter_key(account_id, sp)] = reads
 
         if reads:
             times = [r.get("startTime") for r in reads if r.get("startTime")]
@@ -700,9 +723,13 @@ class NationalGridDataUpdateCoordinator(
         today: date,
         ami_usages: dict[str, list[AmiEnergyUsage]],
         *,
+        key: str | None = None,
         is_first_refresh: bool = False,
     ) -> None:
         """Fetch AMI data for a single meter using a two-pass strategy.
+
+        ``key`` is the coordinator meter key the results are stored under
+        (defaults to the service point for callers that don't pass one).
 
         Pass 1 — bulk history via get_ami_energy_usages() (daily/hourly endpoint):
           First refresh: epoch → today-4d (inclusive)
@@ -809,7 +836,7 @@ class NationalGridDataUpdateCoordinator(
 
         combined = bulk_data + recent_data
         if combined:
-            ami_usages[sp] = combined
+            ami_usages[key or sp] = combined
             self._log_ami_results(combined, sp)
 
     @staticmethod
@@ -837,11 +864,11 @@ class NationalGridDataUpdateCoordinator(
                 sp,
             )
 
-    def get_meter_data(self, service_point_number: str) -> MeterData | None:
-        """Get meter data by service point number."""
+    def get_meter_data(self, key: str) -> MeterData | None:
+        """Get meter data by meter key (see ``meter_key``)."""
         if self.data is None:
             return None
-        return self.data.meters.get(service_point_number)
+        return self.data.meters.get(key)
 
     def get_current_bill(self, account_id: str) -> Bill | None:
         """Return the most recent bill for an account (bills are newest-first)."""
@@ -959,11 +986,11 @@ class NationalGridDataUpdateCoordinator(
 
         return list(account_costs)
 
-    def get_latest_ami_usage(self, service_point_number: str) -> AmiEnergyUsage | None:
-        """Get the most recent AMI usage reading for a service point."""
+    def get_latest_ami_usage(self, key: str) -> AmiEnergyUsage | None:
+        """Get the most recent AMI usage reading for a meter key."""
         if self.data is None:
             return None
-        readings = self.data.ami_usages.get(service_point_number, [])
+        readings = self.data.ami_usages.get(key, [])
         if not readings:
             return None
         return max(readings, key=lambda r: r.get("date", ""))
@@ -1016,7 +1043,7 @@ class NationalGridDataUpdateCoordinator(
                 self._store.async_save({"initial_import_done": False})
             )
 
-    async def async_force_refresh_meter(self, service_point: str) -> None:
+    async def async_force_refresh_meter(self, key: str) -> None:
         """Fetch full AMI history for one meter and re-import its statistics.
 
         Used by the Force Refresh button entity. Fetches from epoch (as if it
@@ -1025,16 +1052,16 @@ class NationalGridDataUpdateCoordinator(
         """
         if self.data is None:
             _LOGGER.warning(
-                "Force refresh: coordinator has no data yet for meter %s",
-                service_point,
+                "Force refresh: coordinator has no data yet for meter %s", key
             )
             return
-        meter_data = self.get_meter_data(service_point)
+        meter_data = self.get_meter_data(key)
         if meter_data is None:
             _LOGGER.warning(
-                "Force refresh: meter %s not found in coordinator data", service_point
+                "Force refresh: meter %s not found in coordinator data", key
             )
             return
+        service_point = meter_data.service_point
 
         today = datetime.now(tz=UTC).date()
         premise_number = str(meter_data.billing_account.get("premiseNumber", ""))
@@ -1046,6 +1073,7 @@ class NationalGridDataUpdateCoordinator(
             sp=service_point,
             today=today,
             ami_usages=self.data.ami_usages,
+            key=key,
             is_first_refresh=True,
         )
 
@@ -1053,6 +1081,4 @@ class NationalGridDataUpdateCoordinator(
         # at module level; statistics.py imports coordinator only under TYPE_CHECKING)
         from .statistics import async_import_meter_statistics  # noqa: PLC0415
 
-        await async_import_meter_statistics(
-            self.hass, self, service_point, force_import_all=True
-        )
+        await async_import_meter_statistics(self.hass, self, key, force_import_all=True)

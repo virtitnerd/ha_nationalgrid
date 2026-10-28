@@ -123,11 +123,11 @@ def _parse_ami_datetime(date_str: str) -> datetime | None:
 async def async_import_meter_statistics(
     hass: HomeAssistant,
     coordinator: NationalGridDataUpdateCoordinator,
-    service_point: str,
+    key: str,
     *,
     force_import_all: bool = False,
 ) -> None:
-    """Import statistics for a single service point.
+    """Import statistics for a single meter (keyed by account + service point).
 
     Used by the Force Refresh button and coordinator.async_force_refresh_meter()
     to re-import one meter's history without touching any other meters.
@@ -135,14 +135,15 @@ async def async_import_meter_statistics(
     data = coordinator.data
     if data is None:
         return
-    ami_readings = data.ami_usages.get(service_point, [])
+    ami_readings = data.ami_usages.get(key, [])
     if not ami_readings:
-        _LOGGER.debug("No AMI readings for %s — nothing to import", service_point)
+        _LOGGER.debug("No AMI readings for %s — nothing to import", key)
         return
-    meter_data = data.meters.get(service_point)
+    meter_data = data.meters.get(key)
     if meter_data is None:
-        _LOGGER.debug("No meter data for %s — skipping import", service_point)
+        _LOGGER.debug("No meter data for %s — skipping import", key)
         return
+    service_point = meter_data.service_point
 
     fuel_type = str(meter_data.meter.get("fuelType", ""))
     is_gas = fuel_type == "Gas"
@@ -198,10 +199,11 @@ async def async_import_all_statistics(
     )
 
     # Import AMI data for all meters
-    for sp, ami_readings in data.ami_usages.items():
-        meter_data = data.meters.get(sp)
+    for key, ami_readings in data.ami_usages.items():
+        meter_data = data.meters.get(key)
         if meter_data is None:
             continue
+        sp = meter_data.service_point
         fuel_type = str(meter_data.meter.get("fuelType", ""))
         is_gas = fuel_type == "Gas"
         account_id = meter_data.account_id
@@ -227,11 +229,13 @@ async def async_import_all_statistics(
             )
 
     # Import interval read stats (electric only; always cleared and reimported)
-    for sp, reads in data.interval_reads.items():
-        meter_data = data.meters.get(sp)
+    for key, reads in data.interval_reads.items():
+        meter_data = data.meters.get(key)
         if meter_data is None:
             continue
-        await _import_interval_stats_electric(hass, sp, meter_data.account_id, reads)
+        await _import_interval_stats_electric(
+            hass, meter_data.service_point, meter_data.account_id, reads
+        )
 
     _LOGGER.info("Statistics import complete")
 

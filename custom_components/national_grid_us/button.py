@@ -29,8 +29,8 @@ async def async_setup_entry(
     coordinator: NationalGridDataUpdateCoordinator = entry.runtime_data
     if coordinator.data:
         async_add_entities(
-            NationalGridForceRefreshButton(coordinator, sp)
-            for sp in coordinator.data.meters
+            NationalGridForceRefreshButton(coordinator, key)
+            for key in coordinator.data.meters
         )
 
 
@@ -44,16 +44,15 @@ class NationalGridForceRefreshButton(NationalGridEntity, ButtonEntity):
     def __init__(
         self,
         coordinator: NationalGridDataUpdateCoordinator,
-        service_point_number: str,
+        meter_key: str,
     ) -> None:
         """Initialize the force refresh button."""
-        super().__init__(coordinator, service_point_number)
-        meter_data = coordinator.get_meter_data(service_point_number)
+        super().__init__(coordinator, meter_key)
+        meter_data = coordinator.get_meter_data(meter_key)
         account_id = meter_data.account_id if meter_data else ""
-        self._attr_unique_id = (
-            f"{DOMAIN}_{account_id}_{service_point_number}_force_refresh"
-        )
+        sp = self._service_point_number
+        self._attr_unique_id = f"{DOMAIN}_{account_id}_{sp}_force_refresh"
 
     async def async_press(self) -> None:
         """Fetch full AMI history for this meter and re-import its statistics."""
-        await self.coordinator.async_force_refresh_meter(self._service_point_number)
+        await self.coordinator.async_force_refresh_meter(self._meter_key)

@@ -294,11 +294,11 @@ async def async_setup_entry(
 
     if coordinator.data:
         # Create sensors for each meter.
-        for service_point_number, meter_data in coordinator.data.meters.items():
+        for key, meter_data in coordinator.data.meters.items():
             entities.extend(
                 NationalGridSensor(
                     coordinator=coordinator,
-                    service_point_number=service_point_number,
+                    meter_key=key,
                     entity_description=description,
                     meter_data=meter_data,
                 )
@@ -328,17 +328,16 @@ class NationalGridSensor(NationalGridEntity, SensorEntity):
     def __init__(
         self,
         coordinator: NationalGridDataUpdateCoordinator,
-        service_point_number: str,
+        meter_key: str,
         entity_description: NationalGridSensorEntityDescription,
         meter_data: MeterData,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator, service_point_number)
+        super().__init__(coordinator, meter_key)
         self.entity_description = entity_description
         acct = meter_data.account_id
-        self._attr_unique_id = (
-            f"{DOMAIN}_{acct}_{service_point_number}_{entity_description.key}"
-        )
+        sp = meter_data.service_point
+        self._attr_unique_id = f"{DOMAIN}_{acct}_{sp}_{entity_description.key}"
         # Set dynamic unit based on meter type.
         if entity_description.unit_fn:
             self._attr_native_unit_of_measurement = entity_description.unit_fn(
@@ -351,7 +350,7 @@ class NationalGridSensor(NationalGridEntity, SensorEntity):
     @property
     def native_value(self) -> Any:
         """Return the sensor value."""
-        meter_data = self.coordinator.get_meter_data(self._service_point_number)
+        meter_data = self.coordinator.get_meter_data(self._meter_key)
         if meter_data is None:
             return None
         return self.entity_description.value_fn(self.coordinator, meter_data)

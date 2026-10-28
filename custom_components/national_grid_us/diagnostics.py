@@ -35,14 +35,16 @@ async def async_get_config_entry_diagnostics(
         return {"error": "No data loaded yet"}
 
     meters: dict[str, Any] = {}
-    for sp, meter_data in data.meters.items():
+    # Keyed by service point plus a counter (not the coordinator key) so the
+    # billing account number never appears unredacted in diagnostics.
+    for index, (key, meter_data) in enumerate(data.meters.items(), start=1):
         meter = meter_data.meter
-        meters[sp] = {
+        meters[f"meter_{index}_sp_{meter_data.service_point}"] = {
             "fuel_type": meter.get("fuelType"),
             "has_ami_smart_meter": meter.get("hasAmiSmartMeter"),
             "is_smart_meter": meter.get("isSmartMeter"),
-            "ami_usage_count": len(data.ami_usages.get(sp, [])),
-            "interval_read_count": len(data.interval_reads.get(sp, [])),
+            "ami_usage_count": len(data.ami_usages.get(key, [])),
+            "interval_read_count": len(data.interval_reads.get(key, [])),
         }
 
     account_summaries: list[dict[str, Any]] = []

@@ -723,13 +723,13 @@ class NationalGridDataUpdateCoordinator(
         today: date,
         ami_usages: dict[str, list[AmiEnergyUsage]],
         *,
-        key: str | None = None,
+        key: str,
         is_first_refresh: bool = False,
     ) -> None:
         """Fetch AMI data for a single meter using a two-pass strategy.
 
-        ``key`` is the coordinator meter key the results are stored under
-        (defaults to the service point for callers that don't pass one).
+        ``key`` is the coordinator meter key (see ``meter_key``) the results
+        are stored under.
 
         Pass 1 — bulk history via get_ami_energy_usages() (daily/hourly endpoint):
           First refresh: epoch → today-4d (inclusive)
@@ -836,7 +836,7 @@ class NationalGridDataUpdateCoordinator(
 
         combined = bulk_data + recent_data
         if combined:
-            ami_usages[key or sp] = combined
+            ami_usages[key] = combined
             self._log_ami_results(combined, sp)
 
     @staticmethod

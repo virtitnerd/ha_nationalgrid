@@ -9,6 +9,10 @@ For electric meters:
 For gas meters:
 - 15-min AMI stats: same endpoint, same window.
 
+For meters without an AMI smart meter:
+- Billed usage and cost from bill history, spread evenly across each billing
+  period's days (daily stats). Bill totals are real; daily values are estimates.
+
 Import strategy:
 - First refresh: Import all 15-min records available (typically ~45 days)
 - Midnight refresh: Import all records in the 5-day window, continuing cumulative
@@ -20,7 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -35,6 +39,8 @@ from homeassistant.components.recorder.statistics import (
     statistics_during_period,
 )
 from homeassistant.const import UnitOfEnergy
+from homeassistant.util import dt as dt_util
+from homeassistant.util.unit_conversion import EnergyConverter
 
 from .const import _LOGGER, DOMAIN
 
@@ -57,8 +63,8 @@ if TYPE_CHECKING:  # pragma: no cover
 def _build_statistic_metadata(
     statistic_id: str,
     name: str,
-    unit: str,
-    unit_class: str,
+    unit: str | None,
+    unit_class: str | None,
 ) -> StatisticMetaData:
     """Build StatisticMetaData with compatibility shims."""
     kwargs: dict[str, object] = {
@@ -232,6 +238,9 @@ async def async_import_all_statistics(
         if meter_data is None:
             continue
         await _import_interval_stats_electric(hass, sp, meter_data.account_id, reads)
+
+    # Import billed usage/cost for meters without AMI data
+    await _import_billed_stats(hass, coordinator)
 
     _LOGGER.info("Statistics import complete")
 
@@ -742,3 +751,192 @@ def _bucket_interval_reads(
         )
 
     return hourly_buckets
+
+
+# Older HA releases have no therm energy unit; gas billed usage is skipped
+# there rather than stored in another unit that would later need converting.
+_UNIT_THERM = getattr(UnitOfEnergy, "THERM", "thm")
+_THERM_SUPPORTED = _UNIT_THERM in EnergyConverter.VALID_UNITS
+
+# Bill history record field holding the billed quantity, per meter fuelType
+_BILLED_QUANTITY_FIELDS = {"Electric": "totalKwh", "Gas": "totalTherms"}
+
+
+def _resolve_billed_stat_info(
+    service_point: str,
+    account_id: str,
+    *,
+    is_gas: bool,
+    is_cost: bool,
+) -> tuple[str, str, str | None, str | None]:
+    """Return (statistic_id, stat_name, unit, unit_class) for a billed series."""
+    # Recorder rejects statistic IDs with uppercase characters
+    prefix = f"{account_id}_{service_point}".lower()
+    display = f"{account_id}-{service_point}"
+    fuel = "gas" if is_gas else "electric"
+    label = "Gas" if is_gas else "Electric"
+    if is_cost:
+        # Monetary series carry no unit, matching HA's Opower integration
+        return (
+            f"{DOMAIN}:{prefix}_{fuel}_billed_cost",
+            f"{display} {label} Billed Cost",
+            None,
+            None,
+        )
+    unit = _UNIT_THERM if is_gas else UnitOfEnergy.KILO_WATT_HOUR
+    return (
+        f"{DOMAIN}:{prefix}_{fuel}_billed_usage",
+        f"{display} {label} Billed Usage",
+        unit,
+        "energy",
+    )
+
+
+def _parse_bill_date(date_str: str) -> date | None:
+    """Parse the date part of a bill history date ("YYYY-MM-DD[T...]")."""
+    try:
+        return date.fromisoformat(date_str[:10])
+    except ValueError:
+        return None
+
+
+async def _import_billed_stats(
+    hass: HomeAssistant,
+    coordinator: NationalGridDataUpdateCoordinator,
+) -> None:
+    """Import billed usage and cost for meters without AMI data.
+
+    Bill history is reported per account and fuel type, so a fuel type is
+    skipped when an account has more than one non-AMI meter of it (the totals
+    could not be attributed to a single meter).
+    """
+    data = coordinator.data
+    if data is None:
+        return
+
+    candidates: dict[tuple[str, str], list[str]] = {}
+    for sp, meter_data in data.meters.items():
+        if meter_data.meter.get("hasAmiSmartMeter") or sp in data.ami_usages:
+            continue
+        fuel_type = str(meter_data.meter.get("fuelType", ""))
+        if fuel_type not in _BILLED_QUANTITY_FIELDS:
+            continue
+        candidates.setdefault((meter_data.account_id, fuel_type), []).append(sp)
+
+    for (account_id, fuel_type), service_points in candidates.items():
+        if len(service_points) > 1:
+            _LOGGER.warning(
+                "Account %s has %s %s meters without AMI; billed usage cannot "
+                "be split between them, skipping billed statistics",
+                account_id,
+                len(service_points),
+                fuel_type,
+            )
+            continue
+        sp = service_points[0]
+        is_gas = fuel_type == "Gas"
+        history = (data.gas_bill_history if is_gas else data.electric_bill_history).get(
+            account_id, []
+        )
+
+        series = [(True, "totalCharges")]
+        if is_gas and not _THERM_SUPPORTED:
+            _LOGGER.warning(
+                "This Home Assistant version has no therm energy unit; "
+                "skipping billed gas usage statistics for %s",
+                sp,
+            )
+        else:
+            series.append((False, _BILLED_QUANTITY_FIELDS[fuel_type]))
+
+        for is_cost, field_name in series:
+            stat_id, stat_name, unit, unit_class = _resolve_billed_stat_info(
+                sp, account_id, is_gas=is_gas, is_cost=is_cost
+            )
+            daily = _spread_bills_by_day(history, field_name)
+            await _import_daily_series(
+                hass, stat_id, stat_name, unit, unit_class, daily
+            )
+
+
+def _spread_bills_by_day(records: list, field_name: str) -> dict[date, float]:
+    """Spread each bill's total evenly over the days of its billing period.
+
+    A period covers readFromDate up to (not including) readDate.
+    """
+    daily: dict[date, float] = {}
+    for record in records:
+        start = _parse_bill_date(str(record.get("readFromDate", "")))
+        end = _parse_bill_date(str(record.get("readDate", "")))
+        total = record.get(field_name)
+        if start is None or end is None or end <= start or total is None:
+            continue
+        days = (end - start).days
+        per_day = float(total) / days
+        for offset in range(days):
+            day = start + timedelta(days=offset)
+            daily[day] = daily.get(day, 0.0) + per_day
+    return daily
+
+
+async def _import_daily_series(  # noqa: PLR0913
+    hass: HomeAssistant,
+    statistic_id: str,
+    stat_name: str,
+    unit: str | None,
+    unit_class: str | None,
+    daily: dict[date, float],
+) -> None:
+    """Import per-day values as stats starting at local midnight.
+
+    The whole available window is rewritten on every refresh (so revised bills
+    are picked up), continuing the cumulative sum from the last stat before
+    the window. Days that have not started yet are skipped.
+    """
+    tz = dt_util.get_default_time_zone()
+    today = dt_util.now(tz).date()
+    days = sorted(day for day in daily if day <= today)
+    if not days:
+        return
+
+    first = days[0]
+    window_start = datetime(first.year, first.month, first.day, tzinfo=tz)
+    running_sum = await _get_sum_before(hass, statistic_id, window_start)
+
+    stats: list[StatisticData] = []
+    for day in days:
+        running_sum += daily[day]
+        start = datetime(day.year, day.month, day.day, tzinfo=tz)
+        stats.append(StatisticData(start=start, state=daily[day], sum=running_sum))
+
+    metadata = _build_statistic_metadata(statistic_id, stat_name, unit, unit_class)
+    async_add_external_statistics(hass, metadata, stats)
+    _LOGGER.info(
+        "Imported %s daily billed stats for %s (%s to %s, sum=%.3f)",
+        len(stats),
+        statistic_id,
+        days[0],
+        days[-1],
+        running_sum,
+    )
+
+
+async def _get_sum_before(
+    hass: HomeAssistant, statistic_id: str, before: datetime
+) -> float:
+    """Return the cumulative sum of the last stat starting before `before`."""
+    stats = await get_instance(hass).async_add_executor_job(
+        partial(
+            statistics_during_period,
+            hass,
+            datetime.fromtimestamp(0, tz=UTC),
+            before,
+            {statistic_id},
+            "hour",
+            None,
+            {"sum"},
+        )
+    )
+    if stats.get(statistic_id):
+        return stats[statistic_id][-1].get("sum") or 0.0
+    return 0.0

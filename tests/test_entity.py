@@ -2,25 +2,19 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.national_grid_us import entity as entity_module
+from custom_components.national_grid_us.const import DOMAIN
 from custom_components.national_grid_us.coordinator import MeterData
 from custom_components.national_grid_us.entity import (
     NationalGridAccountEntity,
     NationalGridEntity,
 )
-
-
-@pytest.fixture(autouse=True)
-def account_device_lookup():
-    """Resolve the account device without a real device registry."""
-    with patch(
-        "custom_components.national_grid_us.entity.dr.async_get_device_id_by_identifier",
-        return_value="account-device-id",
-    ) as lookup:
-        yield lookup
 
 
 def _make_coordinator(meter_data: MeterData | None = None) -> MagicMock:
@@ -134,24 +128,91 @@ def test_entity_device_info_smart_meter_not_ami() -> None:
     assert "AMI" not in device_info["model"]
 
 
-def test_entity_device_info_via_device(account_device_lookup) -> None:
-    """Test that Meter device info links to the account device by id."""
-    meter_data = _make_meter_data()
-    coordinator = _make_coordinator(meter_data)
-    entity = NationalGridEntity(coordinator, "SP1")
-    device_info = entity._attr_device_info
-    assert device_info.get("via_device_id") == "account-device-id"
-    assert "via_device" not in device_info
-    account_device_lookup.assert_called_once_with(
-        coordinator.hass, ("national_grid_us", "acct1"), config_entry_id="test_entry"
+def _register_account_device(hass: HomeAssistant, account_id: str) -> dr.DeviceEntry:
+    """Pre-register the account device the way async_setup_entry does."""
+    entry = MockConfigEntry(domain=DOMAIN)
+    entry.add_to_hass(hass)
+    return dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, account_id)},
+        name=f"National Grid {account_id}",
     )
 
 
+async def test_entity_device_info_via_device_id(hass: HomeAssistant) -> None:
+    """Test that Meter device info links to the registered account device by id."""
+    account_device = _register_account_device(hass, "acct1")
+    coordinator = _make_coordinator(_make_meter_data())
+    coordinator.hass = hass
+    coordinator.config_entry.entry_id = account_device.config_entry_id
+    entity = NationalGridEntity(coordinator, "SP1")
+    device_info = entity._attr_device_info
+    assert device_info.get("via_device_id") == account_device.id
+    assert "via_device" not in device_info
+
+
+async def test_entity_device_info_via_device_id_with_legacy_lookup(
+    hass: HomeAssistant, monkeypatch
+) -> None:
+    """Test cores whose registry lacks async_get_device_by_identifier still link."""
+    account_device = _register_account_device(hass, "acct1")
+
+    class _LegacyRegistry:
+        """A registry that only has the older async_get_device lookup."""
+
+        def async_get_device(self, identifiers: set[tuple[str, str]]):  # noqa: ARG002
+            return account_device
+
+    monkeypatch.setattr(dr, "async_get", lambda _hass: _LegacyRegistry())
+    coordinator = _make_coordinator(_make_meter_data())
+    coordinator.hass = hass
+    entity = NationalGridEntity(coordinator, "SP1")
+    device_info = entity._attr_device_info
+    assert device_info.get("via_device_id") == account_device.id
+    assert "via_device" not in device_info
+
+
+async def test_entity_device_info_via_device_when_account_unregistered(
+    hass: HomeAssistant,
+) -> None:
+    """Test the identifier-tuple fallback when the account device is missing."""
+    coordinator = _make_coordinator(_make_meter_data())
+    coordinator.hass = hass
+    entity = NationalGridEntity(coordinator, "SP1")
+    device_info = entity._attr_device_info
+    assert device_info.get("via_device") == ("national_grid_us", "acct1")
+    assert "via_device_id" not in device_info
+
+
+def test_entity_device_info_via_device_without_hass() -> None:
+    """Test the identifier-tuple fallback when the coordinator has no hass."""
+    coordinator = _make_coordinator(_make_meter_data())
+    entity = NationalGridEntity(coordinator, "SP1")
+    device_info = entity._attr_device_info
+    assert device_info.get("via_device") == ("national_grid_us", "acct1")
+    assert "via_device_id" not in device_info
+
+
+async def test_entity_device_info_via_device_on_older_core(
+    hass: HomeAssistant, monkeypatch
+) -> None:
+    """Test the identifier tuple is used on cores without via_device_id."""
+    _register_account_device(hass, "acct1")
+    monkeypatch.setattr(entity_module, "_core_supports_via_device_id", lambda: False)
+    coordinator = _make_coordinator(_make_meter_data())
+    coordinator.hass = hass
+    entity = NationalGridEntity(coordinator, "SP1")
+    device_info = entity._attr_device_info
+    assert device_info.get("via_device") == ("national_grid_us", "acct1")
+    assert "via_device_id" not in device_info
+
+
 def test_entity_device_info_via_device_fallback() -> None:
-    """Test that Meter device info has no via_device when no meter data."""
+    """Test that Meter device info has no account link when no meter data."""
     coordinator = _make_coordinator(None)
     entity = NationalGridEntity(coordinator, "SP1")
     device_info = entity._attr_device_info
+    assert "via_device" not in device_info
     assert "via_device_id" not in device_info
 
 

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
@@ -24,7 +26,19 @@ from .conftest import (
     MOCK_USERNAME,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
 PATCH_CLIENT = "custom_components.national_grid_us.config_flow.NationalGridClient"
+
+
+@pytest.fixture(autouse=True)
+def mock_setup_entry() -> Generator[AsyncMock]:
+    """Keep created entries from setting up against the real API."""
+    with patch(
+        "custom_components.national_grid_us.async_setup_entry", return_value=True
+    ) as mock:
+        yield mock
 
 
 async def test_user_step_shows_form(hass: HomeAssistant) -> None:
@@ -38,11 +52,12 @@ async def test_user_step_shows_form(hass: HomeAssistant) -> None:
 
 
 async def test_user_step_single_account(hass: HomeAssistant) -> None:
-    """Test user step with a single account still shows the account selection step."""
+    """Test user step with a single account creates the entry without a picker."""
     with patch(PATCH_CLIENT) as mock_cls:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(
             return_value=[{"billingAccountId": MOCK_ACCOUNT_ID}],
         )
@@ -54,14 +69,6 @@ async def test_user_step_single_account(hass: HomeAssistant) -> None:
                 CONF_USERNAME: MOCK_USERNAME,
                 CONF_PASSWORD: MOCK_PASSWORD,
             },
-        )
-
-        assert result["type"] is FlowResultType.FORM
-        assert result["step_id"] == "select_accounts"
-
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            user_input={CONF_SELECTED_ACCOUNTS: [MOCK_ACCOUNT_ID]},
         )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -77,6 +84,7 @@ async def test_user_step_multiple_accounts(hass: HomeAssistant) -> None:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(
             return_value=[
                 {"billingAccountId": MOCK_ACCOUNT_ID},
@@ -103,6 +111,7 @@ async def test_user_step_auth_error(hass: HomeAssistant) -> None:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(
             side_effect=InvalidAuthError("Bad creds"),
         )
@@ -117,13 +126,14 @@ async def test_user_step_auth_error(hass: HomeAssistant) -> None:
         )
 
     assert result["type"] is FlowResultType.FORM
-    assert result["errors"]["base"] == "auth"
+    assert result["errors"]["base"] == "invalid_auth"
 
-    # Recovery: valid credentials should advance to account selection.
+    # Recovery: valid credentials should create the entry.
     with patch(PATCH_CLIENT) as mock_cls:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(
             return_value=[{"billingAccountId": MOCK_ACCOUNT_ID}],
         )
@@ -132,8 +142,8 @@ async def test_user_step_auth_error(hass: HomeAssistant) -> None:
             user_input={CONF_USERNAME: MOCK_USERNAME, CONF_PASSWORD: MOCK_PASSWORD},
         )
 
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "select_accounts"
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_SELECTED_ACCOUNTS] == [MOCK_ACCOUNT_ID]
 
 
 async def test_user_step_communication_error(hass: HomeAssistant) -> None:
@@ -142,6 +152,7 @@ async def test_user_step_communication_error(hass: HomeAssistant) -> None:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(
             side_effect=CannotConnectError("Timeout"),
         )
@@ -156,13 +167,14 @@ async def test_user_step_communication_error(hass: HomeAssistant) -> None:
         )
 
     assert result["type"] is FlowResultType.FORM
-    assert result["errors"]["base"] == "connection"
+    assert result["errors"]["base"] == "cannot_connect"
 
-    # Recovery: valid credentials should advance to account selection.
+    # Recovery: valid credentials should create the entry.
     with patch(PATCH_CLIENT) as mock_cls:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(
             return_value=[{"billingAccountId": MOCK_ACCOUNT_ID}],
         )
@@ -171,19 +183,27 @@ async def test_user_step_communication_error(hass: HomeAssistant) -> None:
             user_input={CONF_USERNAME: MOCK_USERNAME, CONF_PASSWORD: MOCK_PASSWORD},
         )
 
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "select_accounts"
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_SELECTED_ACCOUNTS] == [MOCK_ACCOUNT_ID]
 
 
-async def test_user_step_unknown_error(hass: HomeAssistant) -> None:
+@pytest.mark.parametrize(
+    "side_effect",
+    [
+        pytest.param(NationalGridError("Something broke"), id="national_grid_error"),
+        pytest.param(ValueError("Malformed response"), id="value_error"),
+    ],
+)
+async def test_user_step_unknown_error(
+    hass: HomeAssistant, side_effect: Exception
+) -> None:
     """Test user step with unknown error."""
     with patch(PATCH_CLIENT) as mock_cls:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
-        client.get_linked_accounts = AsyncMock(
-            side_effect=NationalGridError("Something broke"),
-        )
+        client.get_billing_account = AsyncMock(return_value={})
+        client.get_linked_accounts = AsyncMock(side_effect=side_effect)
 
         result = await hass.config_entries.flow.async_init(
             DOMAIN,
@@ -197,11 +217,12 @@ async def test_user_step_unknown_error(hass: HomeAssistant) -> None:
     assert result["type"] is FlowResultType.FORM
     assert result["errors"]["base"] == "unknown"
 
-    # Recovery: valid credentials should advance to account selection.
+    # Recovery: valid credentials should create the entry.
     with patch(PATCH_CLIENT) as mock_cls:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(
             return_value=[{"billingAccountId": MOCK_ACCOUNT_ID}],
         )
@@ -210,8 +231,8 @@ async def test_user_step_unknown_error(hass: HomeAssistant) -> None:
             user_input={CONF_USERNAME: MOCK_USERNAME, CONF_PASSWORD: MOCK_PASSWORD},
         )
 
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "select_accounts"
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_SELECTED_ACCOUNTS] == [MOCK_ACCOUNT_ID]
 
 
 async def test_select_accounts_step(hass: HomeAssistant) -> None:
@@ -220,6 +241,7 @@ async def test_select_accounts_step(hass: HomeAssistant) -> None:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(
             return_value=[
                 {"billingAccountId": MOCK_ACCOUNT_ID},
@@ -255,6 +277,7 @@ async def test_select_accounts_none_selected(hass: HomeAssistant) -> None:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(
             return_value=[
                 {"billingAccountId": MOCK_ACCOUNT_ID},
@@ -298,6 +321,7 @@ async def test_reauth_flow(hass: HomeAssistant) -> None:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(
             return_value=[{"billingAccountId": MOCK_ACCOUNT_ID}],
         )
@@ -337,6 +361,7 @@ async def test_reauth_confirm_auth_error(hass: HomeAssistant) -> None:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(
             side_effect=InvalidAuthError("Bad creds"),
         )
@@ -351,7 +376,7 @@ async def test_reauth_confirm_auth_error(hass: HomeAssistant) -> None:
         )
 
     assert result["type"] is FlowResultType.FORM
-    assert result["errors"]["base"] == "auth"
+    assert result["errors"]["base"] == "invalid_auth"
 
 
 async def test_reauth_confirm_connection_error(hass: HomeAssistant) -> None:
@@ -372,6 +397,7 @@ async def test_reauth_confirm_connection_error(hass: HomeAssistant) -> None:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(
             side_effect=CannotConnectError("Timeout"),
         )
@@ -386,7 +412,7 @@ async def test_reauth_confirm_connection_error(hass: HomeAssistant) -> None:
         )
 
     assert result["type"] is FlowResultType.FORM
-    assert result["errors"]["base"] == "connection"
+    assert result["errors"]["base"] == "cannot_connect"
 
 
 async def test_reauth_confirm_unknown_error(hass: HomeAssistant) -> None:
@@ -407,6 +433,7 @@ async def test_reauth_confirm_unknown_error(hass: HomeAssistant) -> None:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(
             side_effect=NationalGridError("Server error"),
         )
@@ -450,6 +477,7 @@ async def test_reconfigure_shows_form_with_current_selection(
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(
             return_value=[
                 {"billingAccountId": MOCK_ACCOUNT_ID},
@@ -471,6 +499,7 @@ async def test_reconfigure_updates_selected_accounts(hass: HomeAssistant) -> Non
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(
             return_value=[
                 {"billingAccountId": MOCK_ACCOUNT_ID},
@@ -504,6 +533,7 @@ async def test_reconfigure_no_accounts_selected_shows_error(
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(
             return_value=[
                 {"billingAccountId": MOCK_ACCOUNT_ID},
@@ -530,6 +560,7 @@ async def test_reconfigure_auth_error(hass: HomeAssistant) -> None:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(
             side_effect=InvalidAuthError("Bad creds"),
         )
@@ -537,7 +568,7 @@ async def test_reconfigure_auth_error(hass: HomeAssistant) -> None:
         result = await entry.start_reconfigure_flow(hass)
 
     assert result["type"] is FlowResultType.FORM
-    assert result["errors"]["base"] == "auth"
+    assert result["errors"]["base"] == "invalid_auth"
 
 
 async def test_reconfigure_connection_error(hass: HomeAssistant) -> None:
@@ -548,6 +579,7 @@ async def test_reconfigure_connection_error(hass: HomeAssistant) -> None:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(
             side_effect=CannotConnectError("Timeout"),
         )
@@ -555,7 +587,7 @@ async def test_reconfigure_connection_error(hass: HomeAssistant) -> None:
         result = await entry.start_reconfigure_flow(hass)
 
     assert result["type"] is FlowResultType.FORM
-    assert result["errors"]["base"] == "connection"
+    assert result["errors"]["base"] == "cannot_connect"
 
 
 async def test_reconfigure_unknown_error(hass: HomeAssistant) -> None:
@@ -566,6 +598,7 @@ async def test_reconfigure_unknown_error(hass: HomeAssistant) -> None:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(
             side_effect=NationalGridError("Server error"),
         )
@@ -582,6 +615,7 @@ async def test_user_step_no_accounts_found(hass: HomeAssistant) -> None:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(return_value=[])
 
         result = await hass.config_entries.flow.async_init(
@@ -605,6 +639,7 @@ async def test_reconfigure_no_accounts_found(hass: HomeAssistant) -> None:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(return_value=[])
 
         result = await entry.start_reconfigure_flow(hass)
@@ -624,10 +659,13 @@ async def test_account_selection_label_includes_service_address(
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
-        client.get_linked_accounts = AsyncMock(
-            return_value=[{"billingAccountId": MOCK_ACCOUNT_ID}],
-        )
         client.get_billing_account = AsyncMock(return_value=mock_billing)
+        client.get_linked_accounts = AsyncMock(
+            return_value=[
+                {"billingAccountId": MOCK_ACCOUNT_ID},
+                {"billingAccountId": MOCK_ACCOUNT_ID_2},
+            ],
+        )
 
         result = await hass.config_entries.flow.async_init(
             DOMAIN,
@@ -641,23 +679,34 @@ async def test_account_selection_label_includes_service_address(
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "select_accounts"
     options = result["data_schema"].schema[CONF_SELECTED_ACCOUNTS].config["options"]
-    assert len(options) == 1
+    assert len(options) == 2
     assert options[0]["value"] == MOCK_ACCOUNT_ID
     assert "123 Main St" in options[0]["label"]
 
 
+@pytest.mark.parametrize(
+    "side_effect",
+    [
+        pytest.param(CannotConnectError("timeout"), id="cannot_connect"),
+        pytest.param(NationalGridError("lookup failed"), id="national_grid_error"),
+        pytest.param(ValueError("GraphQL error"), id="value_error"),
+    ],
+)
 async def test_account_selection_label_without_service_address_on_error(
-    hass: HomeAssistant,
+    hass: HomeAssistant, side_effect: Exception
 ) -> None:
     """Test account label falls back gracefully when get_billing_account raises."""
     with patch(PATCH_CLIENT) as mock_cls:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(side_effect=side_effect)
         client.get_linked_accounts = AsyncMock(
-            return_value=[{"billingAccountId": MOCK_ACCOUNT_ID}],
+            return_value=[
+                {"billingAccountId": MOCK_ACCOUNT_ID},
+                {"billingAccountId": MOCK_ACCOUNT_ID_2},
+            ],
         )
-        client.get_billing_account = AsyncMock(side_effect=Exception("lookup failed"))
 
         result = await hass.config_entries.flow.async_init(
             DOMAIN,
@@ -671,7 +720,7 @@ async def test_account_selection_label_without_service_address_on_error(
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "select_accounts"
     options = result["data_schema"].schema[CONF_SELECTED_ACCOUNTS].config["options"]
-    assert len(options) == 1
+    assert len(options) == 2
     assert options[0]["label"] == f"Account {MOCK_ACCOUNT_ID}"
 
 
@@ -693,6 +742,80 @@ async def test_already_configured(hass: HomeAssistant) -> None:
         client = mock_cls.return_value
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
+        client.get_linked_accounts = AsyncMock(
+            return_value=[{"billingAccountId": MOCK_ACCOUNT_ID}],
+        )
+
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={
+                CONF_USERNAME: MOCK_USERNAME,
+                CONF_PASSWORD: MOCK_PASSWORD,
+            },
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+
+def _add_other_login_entry(hass: HomeAssistant, selected: list[str]) -> None:
+    """Register an entry for a different login that monitors `selected`."""
+    MockConfigEntry(
+        domain=DOMAIN,
+        title="other@example.com",
+        data={
+            CONF_USERNAME: "other@example.com",
+            CONF_PASSWORD: MOCK_PASSWORD,
+            CONF_SELECTED_ACCOUNTS: selected,
+        },
+        unique_id="other-example-com",
+    ).add_to_hass(hass)
+
+
+async def test_user_step_hides_accounts_configured_by_another_login(
+    hass: HomeAssistant,
+) -> None:
+    """Test accounts monitored by another entry are not offered again."""
+    _add_other_login_entry(hass, [MOCK_ACCOUNT_ID])
+
+    with patch(PATCH_CLIENT) as mock_cls:
+        client = mock_cls.return_value
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
+        client.get_linked_accounts = AsyncMock(
+            return_value=[
+                {"billingAccountId": MOCK_ACCOUNT_ID},
+                {"billingAccountId": MOCK_ACCOUNT_ID_2},
+            ],
+        )
+
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={
+                CONF_USERNAME: MOCK_USERNAME,
+                CONF_PASSWORD: MOCK_PASSWORD,
+            },
+        )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_SELECTED_ACCOUNTS] == [MOCK_ACCOUNT_ID_2]
+
+
+async def test_user_step_aborts_when_all_accounts_configured_by_another_login(
+    hass: HomeAssistant,
+) -> None:
+    """Test the flow aborts when every account is already monitored."""
+    _add_other_login_entry(hass, [MOCK_ACCOUNT_ID])
+
+    with patch(PATCH_CLIENT) as mock_cls:
+        client = mock_cls.return_value
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get_billing_account = AsyncMock(return_value={})
         client.get_linked_accounts = AsyncMock(
             return_value=[{"billingAccountId": MOCK_ACCOUNT_ID}],
         )

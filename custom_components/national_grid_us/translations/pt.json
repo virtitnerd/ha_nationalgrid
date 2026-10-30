@@ -29,8 +29,8 @@
             }
         },
         "error": {
-            "auth": "Nome de usuário ou senha inválidos.",
-            "connection": "Não é possível conectar à National Grid.",
+            "invalid_auth": "Nome de usuário ou senha inválidos.",
+            "cannot_connect": "Não é possível conectar à National Grid.",
             "unknown": "Ocorreu um erro inesperado.",
             "no_accounts_selected": "Por favor, selecione pelo menos uma conta."
         },

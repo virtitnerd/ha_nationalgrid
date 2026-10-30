@@ -29,8 +29,8 @@
             }
         },
         "error": {
-            "auth": "Nome utente o password non validi.",
-            "connection": "Impossibile connettersi a National Grid.",
+            "invalid_auth": "Nome utente o password non validi.",
+            "cannot_connect": "Impossibile connettersi a National Grid.",
             "unknown": "Si è verificato un errore imprevisto.",
             "no_accounts_selected": "Seleziona almeno un conto."
         },

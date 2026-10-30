@@ -46,14 +46,12 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     username=self._username,
                     password=self._password,
                 )
-            except InvalidAuthError as exception:
-                _LOGGER.warning(exception)
-                _errors["base"] = "auth"
-            except CannotConnectError as exception:
-                _LOGGER.error(exception)
-                _errors["base"] = "connection"
-            except NationalGridError as exception:
-                _LOGGER.exception(exception)
+            except InvalidAuthError:
+                _errors["base"] = "invalid_auth"
+            except CannotConnectError:
+                _errors["base"] = "cannot_connect"
+            except NationalGridError, ValueError:
+                _LOGGER.exception("Unexpected error")
                 _errors["base"] = "unknown"
             else:
                 if not self._accounts:
@@ -61,6 +59,25 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     return self.async_abort(reason="no_accounts_found")
                 await self.async_set_unique_id(slugify(self._username))
                 self._abort_if_unique_id_configured()
+
+                # Another login can share a billing account; entity unique IDs
+                # are per account, so each account may only be in one entry.
+                configured = {
+                    account_id
+                    for entry in self._async_current_entries(include_ignore=False)
+                    for account_id in entry.data.get(CONF_SELECTED_ACCOUNTS, [])
+                }
+                self._accounts = [
+                    account
+                    for account in self._accounts
+                    if account["billingAccountId"] not in configured
+                ]
+                if not self._accounts:
+                    return self.async_abort(reason="already_configured")
+                if len(self._accounts) == 1:
+                    return self._async_create_accounts_entry(
+                        [self._accounts[0]["billingAccountId"]]
+                    )
 
                 return await self.async_step_select_accounts()
 
@@ -100,19 +117,25 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     errors={"base": "no_accounts_selected"},
                 )
 
-            return self.async_create_entry(
-                title=self._username or "",
-                data={
-                    CONF_USERNAME: self._username,
-                    CONF_PASSWORD: self._password,
-                    CONF_SELECTED_ACCOUNTS: selected,
-                },
-            )
+            return self._async_create_accounts_entry(selected)
 
         return self.async_show_form(
             step_id="select_accounts",
             data_schema=self._get_account_selection_schema(),
             errors={},
+        )
+
+    def _async_create_accounts_entry(
+        self, selected: list[str]
+    ) -> config_entries.ConfigFlowResult:
+        """Create the config entry for the selected billing accounts."""
+        return self.async_create_entry(
+            title=self._username or "",
+            data={
+                CONF_USERNAME: self._username,
+                CONF_PASSWORD: self._password,
+                CONF_SELECTED_ACCOUNTS: selected,
+            },
         )
 
     async def async_step_reconfigure(
@@ -129,14 +152,12 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     username=reconfigure_entry.data[CONF_USERNAME],
                     password=reconfigure_entry.data[CONF_PASSWORD],
                 )
-            except InvalidAuthError as exception:
-                _LOGGER.warning(exception)
-                _errors["base"] = "auth"
-            except CannotConnectError as exception:
-                _LOGGER.error(exception)
-                _errors["base"] = "connection"
-            except NationalGridError as exception:
-                _LOGGER.exception(exception)
+            except InvalidAuthError:
+                _errors["base"] = "invalid_auth"
+            except CannotConnectError:
+                _errors["base"] = "cannot_connect"
+            except NationalGridError, ValueError:
+                _LOGGER.exception("Unexpected error")
                 _errors["base"] = "unknown"
             else:
                 if not self._accounts:
@@ -191,14 +212,12 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     username=username,
                     password=password,
                 )
-            except InvalidAuthError as exception:
-                _LOGGER.warning(exception)
-                _errors["base"] = "auth"
-            except CannotConnectError as exception:
-                _LOGGER.error(exception)
-                _errors["base"] = "connection"
-            except NationalGridError as exception:
-                _LOGGER.exception(exception)
+            except InvalidAuthError:
+                _errors["base"] = "invalid_auth"
+            except CannotConnectError:
+                _errors["base"] = "cannot_connect"
+            except NationalGridError, ValueError:
+                _LOGGER.exception("Unexpected error")
                 _errors["base"] = "unknown"
             else:
                 reauth_entry = self._get_reauth_entry()
@@ -281,17 +300,25 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             result = []
             for account in accounts:
                 account_dict: dict[str, str] = dict(account.items())  # type: ignore[arg-type]
+                account_dict["serviceAddressCompressed"] = ""
+                # The address only labels the account, so a failed lookup
+                # degrades to the bare ID.
                 try:
                     billing = await client.get_billing_account(
                         account["billingAccountId"]
                     )
+                except (CannotConnectError, NationalGridError, ValueError) as err:
+                    _LOGGER.debug(
+                        "Could not fetch service address for account %s: %s",
+                        account["billingAccountId"],
+                        err,
+                    )
+                else:
                     account_dict["serviceAddressCompressed"] = (
                         billing.get("serviceAddress", {}).get(
                             "serviceAddressCompressed", ""
                         )
                         or ""
                     )
-                except Exception:  # noqa: BLE001
-                    account_dict["serviceAddressCompressed"] = ""
                 result.append(account_dict)
             return result

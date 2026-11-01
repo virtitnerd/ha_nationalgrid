@@ -294,7 +294,8 @@ class NationalGridDataUpdateCoordinator(
 
         # After first successful refresh, mark as complete and persist so
         # subsequent HA restarts skip the slow epoch→today AMI fetch.
-        if self._is_first_refresh:
+        was_first_refresh = self._is_first_refresh
+        if was_first_refresh:
             self._is_first_refresh = False
             _LOGGER.info("First refresh complete - switching to incremental updates")
             if self._store is not None:
@@ -311,7 +312,7 @@ class NationalGridDataUpdateCoordinator(
             meters=meters,
             reading_dates=reading_dates,
             usages=usages,
-            is_first_refresh=self._is_first_refresh,
+            is_first_refresh=was_first_refresh,
             is_midnight_refresh=self._is_midnight_refresh,
         )
 

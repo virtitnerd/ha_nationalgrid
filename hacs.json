@@ -1,6 +1,6 @@
 {
     "name": "National Grid US",
-    "homeassistant": "2026.10.0",
+    "homeassistant": "2026.11.0b0",
     "hacs": "2.0.5",
     "country": "US",
     "zip_release": true,

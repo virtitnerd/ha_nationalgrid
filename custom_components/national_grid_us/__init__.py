@@ -14,10 +14,19 @@ from homeassistant.components.persistent_notification import (
     async_create as pn_create,
 )
 from homeassistant.components.recorder import get_instance as recorder_get_instance
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
+from homeassistant.components.recorder.statistics import (
+    async_update_statistics_metadata,
+)
+from homeassistant.const import (
+    CONF_PASSWORD,
+    CONF_USERNAME,
+    Platform,
+    UnitOfEnergy,
+)
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_track_time_change
+from homeassistant.util.unit_conversion import EnergyConverter
 from sqlalchemy import text as sa_text
 
 from .const import _LOGGER, DOMAIN
@@ -125,14 +134,14 @@ async def _async_migrate_statistics_v1_to_v2(hass: HomeAssistant) -> None:
 
 
 async def _async_migrate_gas_ccf_to_therm(hass: HomeAssistant) -> None:
-    """Clear gas statistics still labeled CCF so they reimport as therms.
+    """Relabel gas statistics still marked CCF as therms, keeping their history.
 
     National Grid's gas usage has always been reported in therms
     (usageType: THERMS, totalTherms in bill history); this integration used
     to mislabel it as CCF because Home Assistant had no native therm unit.
-    The stat_id stays the same — only the unit changes — so existing Energy
-    Dashboard configuration referencing the gas stat_id keeps working once
-    it reimports. This is idempotent: zero rows affected after the first run.
+    Only the metadata is wrong, so it is updated in place: the stat_id, sums and
+    Energy Dashboard configuration all stay as they are. This is idempotent:
+    no rows match after the first run.
     """
     try:
         instance = recorder_get_instance(hass)
@@ -157,18 +166,15 @@ async def _async_migrate_gas_ccf_to_therm(hass: HomeAssistant) -> None:
         _LOGGER.warning("Gas unit migration encountered an error: %s", err)
         return
 
-    if not stale_ids:
-        return
-
-    # Use the recorder's own clear task rather than raw DELETEs: it also drops
-    # the recorder's cached metadata ids, which would otherwise point at the
-    # deleted rows and fail the reimport with a foreign key error. Tasks run in
-    # queue order, so this finishes before the reimport queued after it.
-    instance.async_clear_statistics(stale_ids)
-    _LOGGER.info(
-        "Cleared %d CCF-labeled gas statistic series for reimport as therms",
-        len(stale_ids),
-    )
+    for statistic_id in stale_ids:
+        async_update_statistics_metadata(
+            hass,
+            statistic_id,
+            new_unit_class=EnergyConverter.UNIT_CLASS,
+            new_unit_of_measurement=UnitOfEnergy.THERM,
+        )
+    if stale_ids:
+        _LOGGER.info("Relabeled %d CCF gas statistic series as therms", len(stale_ids))
 
 
 def _warn_if_old_component_present(hass: HomeAssistant) -> None:
@@ -225,7 +231,7 @@ async def async_setup_entry(
     # This is idempotent — zero rows affected after the first run.
     await _async_migrate_statistics_v1_to_v2(hass)
 
-    # Clear gas statistics still labeled CCF so they reimport as therms.
+    # Relabel gas statistics still marked CCF as therms (history is kept).
     # This is idempotent — zero rows affected after the first run.
     await _async_migrate_gas_ccf_to_therm(hass)
 

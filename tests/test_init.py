@@ -439,8 +439,8 @@ async def test_setup_entry_runs_statistics_rename(hass: HomeAssistant) -> None:
     """Test async_setup_entry runs the statistics migrations on startup.
 
     Covers both the old national_grid -> national_grid_us rename (3 DELETEs +
-    1 UPDATE) and the gas CCF -> therm cleanup (1 SELECT of stale ids, then
-    the recorder's own clear task), for 5 execute calls across the two
+    1 UPDATE) and the gas CCF -> therm relabel (1 SELECT of stale ids, then
+    the recorder's metadata update), for 5 execute calls across the two
     migrations' own sessions.
     """
     # Use version=2 so async_migrate_entry is NOT triggered; only
@@ -479,6 +479,9 @@ async def test_setup_entry_runs_statistics_rename(hass: HomeAssistant) -> None:
             "custom_components.national_grid_us.recorder_get_instance",
             return_value=mock_instance,
         ),
+        patch(
+            "custom_components.national_grid_us.async_update_statistics_metadata"
+        ) as mock_relabel,
     ):
         await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -487,10 +490,13 @@ async def test_setup_entry_runs_statistics_rename(hass: HomeAssistant) -> None:
     # v1->v2 rename: 3 DELETEs + 1 UPDATE. Gas CCF->therm cleanup: 1 SELECT.
     assert session.execute.call_count == 5
     assert session.commit.call_count == 1
-    # Stale series are cleared through the recorder so its metadata cache is
-    # dropped too; raw DELETEs left it pointing at removed rows.
-    mock_instance.async_clear_statistics.assert_called_once_with(
-        ["national_grid_us:acct_100_gas_hourly_usage"]
+    # Stale series are relabeled in place through the recorder, which keeps
+    # their history; clearing them raced the importer's read of the last sum.
+    mock_relabel.assert_called_once_with(
+        hass,
+        "national_grid_us:acct_100_gas_hourly_usage",
+        new_unit_class="energy",
+        new_unit_of_measurement="thm",
     )
 
 

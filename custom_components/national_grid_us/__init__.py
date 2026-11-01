@@ -258,7 +258,9 @@ async def async_setup_entry(
 
     # Re-import statistics on each coordinator update.
     def _on_update() -> None:
-        hass.async_create_task(async_import_all_statistics(hass, coordinator))
+        coordinator.import_task = hass.async_create_task(
+            async_import_all_statistics(hass, coordinator)
+        )
 
     entry.async_on_unload(coordinator.async_add_listener(_on_update))
 
@@ -334,8 +336,9 @@ async def _async_setup_services(hass: HomeAssistant) -> None:
             # Trigger an immediate refresh
             await coordinator.async_refresh()
 
-            # Import statistics after refresh
-            await async_import_all_statistics(hass, coordinator)
+            # The update listener already started the import; wait for it
+            if coordinator.import_task is not None:
+                await coordinator.import_task
 
             _LOGGER.info(
                 "Force full refresh completed for account: %s",

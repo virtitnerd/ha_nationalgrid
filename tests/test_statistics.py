@@ -1027,7 +1027,6 @@ def _gas_bill(read_from: str, read: str, therms: float, charges: float) -> dict:
     }
 
 
-@patch("custom_components.national_grid_us.statistics._THERM_SUPPORTED", new=True)
 @patch("custom_components.national_grid_us.statistics.async_add_external_statistics")
 @patch("custom_components.national_grid_us.statistics.get_instance")
 async def test_import_billed_stats_gas(mock_get_instance, mock_add_stats, hass) -> None:
@@ -1090,7 +1089,6 @@ async def test_import_billed_stats_continues_sum(
     assert calls[sid][-1]["sum"] == 200.0
 
 
-@patch("custom_components.national_grid_us.statistics._THERM_SUPPORTED", new=True)
 @patch("custom_components.national_grid_us.statistics.async_add_external_statistics")
 @patch("custom_components.national_grid_us.statistics.get_instance")
 async def test_import_billed_stats_skips_future_days(
@@ -1145,26 +1143,6 @@ async def test_import_billed_stats_skips_ami_and_ambiguous_meters(
     assert not mock_add_stats.called
 
 
-@patch("custom_components.national_grid_us.statistics._THERM_SUPPORTED", new=False)
-@patch("custom_components.national_grid_us.statistics.async_add_external_statistics")
-@patch("custom_components.national_grid_us.statistics.get_instance")
-async def test_import_billed_stats_gas_without_therm_unit(
-    mock_get_instance, mock_add_stats, hass
-) -> None:
-    """Test gas usage is skipped (cost still imported) when therms are unsupported."""
-    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
-    coordinator = _make_billed_coordinator(
-        meters={"SP1": _make_non_ami_meter("Gas")},
-        gas_bills=[_gas_bill("2025-01-06", "2025-02-05", 60.0, 90.0)],
-    )
-
-    await async_import_all_statistics(hass, coordinator)
-
-    ids = [c[0][1]["statistic_id"] for c in mock_add_stats.call_args_list]
-    assert ids == ["national_grid_us:acct1_sp1_gas_billed_cost"]
-
-
-@patch("custom_components.national_grid_us.statistics._THERM_SUPPORTED", new=True)
 @patch("custom_components.national_grid_us.statistics.async_add_external_statistics")
 @patch("custom_components.national_grid_us.statistics.get_instance")
 async def test_import_billed_stats_per_account_when_service_points_repeat(

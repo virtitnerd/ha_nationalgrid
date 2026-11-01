@@ -40,7 +40,6 @@ from homeassistant.components.recorder.statistics import (
 )
 from homeassistant.const import UnitOfEnergy
 from homeassistant.util import dt as dt_util
-from homeassistant.util.unit_conversion import EnergyConverter
 
 from .const import _LOGGER, DOMAIN
 
@@ -763,11 +762,6 @@ def _bucket_interval_reads(
     return hourly_buckets
 
 
-# Older HA releases have no therm energy unit; gas billed usage is skipped
-# there rather than stored in another unit that would later need converting.
-_UNIT_THERM = getattr(UnitOfEnergy, "THERM", "thm")
-_THERM_SUPPORTED = _UNIT_THERM in EnergyConverter.VALID_UNITS
-
 # Bill history record field holding the billed quantity, per meter fuelType
 _BILLED_QUANTITY_FIELDS = {"Electric": "totalKwh", "Gas": "totalTherms"}
 
@@ -793,7 +787,7 @@ def _resolve_billed_stat_info(
             None,
             None,
         )
-    unit = _UNIT_THERM if is_gas else UnitOfEnergy.KILO_WATT_HOUR
+    unit = UnitOfEnergy.THERM if is_gas else UnitOfEnergy.KILO_WATT_HOUR
     return (
         f"{DOMAIN}:{prefix}_{fuel}_billed_usage",
         f"{display} {label} Billed Usage",
@@ -851,15 +845,7 @@ async def _import_billed_stats(
             account_id, []
         )
 
-        series = [(True, "totalCharges")]
-        if is_gas and not _THERM_SUPPORTED:
-            _LOGGER.warning(
-                "This Home Assistant version has no therm energy unit; "
-                "skipping billed gas usage statistics for %s",
-                sp,
-            )
-        else:
-            series.append((False, _BILLED_QUANTITY_FIELDS[fuel_type]))
+        series = [(True, "totalCharges"), (False, _BILLED_QUANTITY_FIELDS[fuel_type])]
 
         for is_cost, field_name in series:
             stat_id, stat_name, unit, unit_class = _resolve_billed_stat_info(

@@ -59,6 +59,7 @@ async def test_ami_boundary_energy_counted_once(
         MOCK_SERVICE_POINT,
         today,
         readings,
+        key=MOCK_SERVICE_POINT,
         is_first_refresh=first_refresh,
     )
 
@@ -94,6 +95,7 @@ async def test_recent_ami_failure_preserves_successful_bulk(hass, first_refresh)
         MOCK_SERVICE_POINT,
         date(2026, 10, 5),
         readings,
+        key=MOCK_SERVICE_POINT,
         is_first_refresh=first_refresh,
     )
     assert readings[MOCK_SERVICE_POINT] == bulk

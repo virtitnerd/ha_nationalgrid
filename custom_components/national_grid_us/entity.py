@@ -36,16 +36,24 @@ class NationalGridEntity(CoordinatorEntity[NationalGridDataUpdateCoordinator]):
     def __init__(
         self,
         coordinator: NationalGridDataUpdateCoordinator,
-        service_point_number: str,
+        meter_key: str,
     ) -> None:
-        """Initialize the entity."""
+        """Initialize the entity.
+
+        ``meter_key`` is the coordinator key (account id + service point), since
+        service point numbers repeat across billing accounts.
+        """
         super().__init__(coordinator)
-        self._service_point_number = service_point_number
+        self._meter_key = meter_key
+        meter_data = coordinator.get_meter_data(meter_key)
+        self._service_point_number = (
+            meter_data.service_point if meter_data else meter_key
+        )
         self._attr_device_info = self._build_device_info()
 
     def _build_device_info(self) -> DeviceInfo:
         """Build device info for this meter."""
-        meter_data = self.coordinator.get_meter_data(self._service_point_number)
+        meter_data = self.coordinator.get_meter_data(self._meter_key)
 
         if meter_data is None:
             return DeviceInfo(
@@ -140,19 +148,19 @@ class NationalGridEntity(CoordinatorEntity[NationalGridDataUpdateCoordinator]):
     @property
     def account_id(self) -> str | None:
         """Return the account ID for this meter."""
-        meter_data = self.coordinator.get_meter_data(self._service_point_number)
+        meter_data = self.coordinator.get_meter_data(self._meter_key)
         return meter_data.account_id if meter_data else None
 
     @property
     def meter(self) -> Meter | None:
         """Return the meter data."""
-        meter_data = self.coordinator.get_meter_data(self._service_point_number)
+        meter_data = self.coordinator.get_meter_data(self._meter_key)
         return meter_data.meter if meter_data else None
 
     @property
     def billing_account(self) -> BillingAccount | None:
         """Return the billing account data."""
-        meter_data = self.coordinator.get_meter_data(self._service_point_number)
+        meter_data = self.coordinator.get_meter_data(self._meter_key)
         return meter_data.billing_account if meter_data else None
 
 

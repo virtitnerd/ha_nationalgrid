@@ -61,11 +61,11 @@ async def async_setup_entry(
 
     # Create binary sensors for each meter.
     if coordinator.data:
-        for service_point_number in coordinator.data.meters:
+        for key in coordinator.data.meters:
             entities.extend(
                 NationalGridBinarySensor(
                     coordinator=coordinator,
-                    service_point_number=service_point_number,
+                    meter_key=key,
                     entity_description=description,
                 )
                 for description in BINARY_SENSOR_DESCRIPTIONS
@@ -82,22 +82,21 @@ class NationalGridBinarySensor(NationalGridEntity, BinarySensorEntity):
     def __init__(
         self,
         coordinator: NationalGridDataUpdateCoordinator,
-        service_point_number: str,
+        meter_key: str,
         entity_description: NationalGridBinarySensorEntityDescription,
     ) -> None:
         """Initialize the binary sensor."""
-        super().__init__(coordinator, service_point_number)
+        super().__init__(coordinator, meter_key)
         self.entity_description = entity_description
-        meter_data = coordinator.get_meter_data(service_point_number)
+        meter_data = coordinator.get_meter_data(meter_key)
         account_id = meter_data.account_id if meter_data else ""
-        self._attr_unique_id = (
-            f"{DOMAIN}_{account_id}_{service_point_number}_{entity_description.key}"
-        )
+        sp = self._service_point_number
+        self._attr_unique_id = f"{DOMAIN}_{account_id}_{sp}_{entity_description.key}"
 
     @property
     def is_on(self) -> bool | None:
         """Return true if the binary sensor is on."""
-        meter_data = self.coordinator.get_meter_data(self._service_point_number)
+        meter_data = self.coordinator.get_meter_data(self._meter_key)
         if meter_data is None:
             return None
         return self.entity_description.value_fn(meter_data)

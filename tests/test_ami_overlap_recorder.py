@@ -78,10 +78,12 @@ async def test_daily_and_hourly_refreshes_count_each_day_once(hass, repair_old_o
             if repair_old_overlap and cycle == 0:
                 # Seed the old bug using synthetic overlapping hourly rows.
                 cutoff = current.date() - timedelta(days=3)
-                coordinator.data.ami_usages[SERVICE_POINT] += response(
-                    False,
-                    date_from=cutoff,
-                    date_to=cutoff,
+                coordinator.data.ami_usages[f"{MOCK_ACCOUNT_ID}_{SERVICE_POINT}"] += (
+                    response(
+                        False,
+                        date_from=cutoff,
+                        date_to=cutoff,
+                    )
                 )
 
             await async_import_all_statistics(hass, coordinator)

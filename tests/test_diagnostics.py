@@ -163,3 +163,22 @@ async def test_diagnostics_no_data(hass: HomeAssistant, config_entry) -> None:
     finally:
         if original_runtime_data is not None:
             object.__setattr__(config_entry, "runtime_data", original_runtime_data)
+
+
+async def test_diagnostics_meter_keys_do_not_expose_account_number(
+    hass: HomeAssistant, config_entry
+) -> None:
+    """Meter entries are keyed without the billing account number."""
+    with (
+        patch(PATCH_CLIENT, return_value=_make_api_mock()),
+        patch(PATCH_SESSION),
+        patch(PATCH_STATISTICS, new_callable=AsyncMock),
+    ):
+        await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    diag = await async_get_config_entry_diagnostics(hass, config_entry)
+
+    assert diag["meters"]
+    for meter_key in diag["meters"]:
+        assert MOCK_ACCOUNT_ID not in meter_key

@@ -10,6 +10,8 @@ MOCK_ACCOUNT_ID = "1234567890"
 MOCK_ACCOUNT_ID_2 = "0987654321"
 MOCK_SERVICE_POINT = "SP001"
 MOCK_SERVICE_POINT_2 = "SP002"
+# Coordinator key for the primary meter (account id + service point).
+MOCK_METER_KEY = f"{MOCK_ACCOUNT_ID}_{MOCK_SERVICE_POINT}"
 
 
 @pytest.fixture(autouse=True)

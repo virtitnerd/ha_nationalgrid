@@ -27,6 +27,7 @@ from custom_components.national_grid_us.coordinator import (
 
 from .conftest import (
     MOCK_ACCOUNT_ID,
+    MOCK_METER_KEY,
     MOCK_SERVICE_POINT,
     _mock_account_links,
     _mock_ami_usages,
@@ -250,7 +251,7 @@ async def test_get_latest_ami_usage(hass: HomeAssistant) -> None:
     coordinator = _make_coordinator(hass, api)
     coordinator.data = await coordinator._async_update_data()
 
-    ami = coordinator.get_latest_ami_usage(MOCK_SERVICE_POINT)
+    ami = coordinator.get_latest_ami_usage(MOCK_METER_KEY)
     assert ami is not None
 
 
@@ -316,7 +317,7 @@ async def test_fetch_ami_error_incremental_pass2_still_runs(
         data = await coordinator._async_update_data()
 
     # Pass 2 (recent 72 h) still ran and provided data
-    assert MOCK_SERVICE_POINT in data.ami_usages
+    assert MOCK_METER_KEY in data.ami_usages
     # 15-min was called with the recent ~3-day window, not a 50-day fallback
     call_kwargs = api.get_ami_energy_usages_15min.call_args
     days_back = (datetime.now(UTC).date() - call_kwargs.kwargs["date_from"]).days
@@ -335,7 +336,7 @@ async def test_fetch_ami_falls_back_to_15min_on_primary_failure(
     coordinator = _make_coordinator(hass, api)
     data = await coordinator._async_update_data()
 
-    assert MOCK_SERVICE_POINT in data.ami_usages
+    assert MOCK_METER_KEY in data.ami_usages
 
     # Two 15-min calls: one epoch-based fallback (Pass 1) + one recent 3-day (Pass 2)
     calls = api.get_ami_energy_usages_15min.call_args_list
@@ -582,7 +583,7 @@ async def test_async_force_refresh_meter_fetches_from_epoch(
     coordinator = _make_coordinator(hass, api)
     coordinator.data = await coordinator._async_update_data()
 
-    await coordinator.async_force_refresh_meter(MOCK_SERVICE_POINT)
+    await coordinator.async_force_refresh_meter(MOCK_METER_KEY)
 
     call_kwargs = api.get_ami_energy_usages.call_args
     date_from = call_kwargs.kwargs["date_from"]
@@ -601,7 +602,7 @@ async def test_async_force_refresh_meter_no_data(hass: HomeAssistant) -> None:
     coordinator.data = None
 
     # Should not raise
-    await coordinator.async_force_refresh_meter(MOCK_SERVICE_POINT)
+    await coordinator.async_force_refresh_meter(MOCK_METER_KEY)
     # API should not have been called a second time
     api.get_ami_energy_usages.assert_not_called()
 
@@ -1021,7 +1022,7 @@ async def test_interval_reads_widened_window_falls_back_on_error(
 
     assert api.get_interval_reads.call_count == 2
     assert "retrying with 24h fallback window" in caplog.text
-    assert data.interval_reads[MOCK_SERVICE_POINT] == [{"startTime": "x", "value": 1}]
+    assert data.interval_reads[MOCK_METER_KEY] == [{"startTime": "x", "value": 1}]
 
 
 async def test_interval_reads_widened_window_fallback_also_fails(
@@ -1387,3 +1388,47 @@ async def test_seed_from_previous_preserves_bill_history(hass: HomeAssistant) ->
     data2 = await coordinator._async_update_data()
 
     assert MOCK_ACCOUNT_ID in data2.electric_bill_history
+
+
+async def test_meters_with_same_service_point_on_different_accounts(
+    hass: HomeAssistant,
+) -> None:
+    """Meters sharing a service point number on two accounts stay separate.
+
+    National Grid assigns the same service point numbers (e.g. "200") on every
+    billing account, so meters must be keyed by account + service point.
+    """
+    from .conftest import _mock_billing_account
+
+    acct_a, acct_b = "1111111111", "2222222222"
+
+    def billing(account_id: str) -> dict:
+        account = _mock_billing_account(account_id)
+        account["meter"]["nodes"] = [
+            {
+                "servicePointNumber": "200",
+                "meterNumber": f"MTR-{account_id}",
+                "meterPointNumber": f"MPT-{account_id}",
+                "fuelType": "Electric",
+                "hasAmiSmartMeter": True,
+            }
+        ]
+        return account
+
+    api = _make_api()
+    api.get_billing_account = AsyncMock(side_effect=billing)
+    coordinator = _make_coordinator(hass, api)
+    coordinator.config_entry.data = {CONF_SELECTED_ACCOUNTS: [acct_a, acct_b]}
+
+    data = await coordinator._async_update_data()
+    coordinator.data = data
+
+    assert set(data.meters) == {f"{acct_a}_200", f"{acct_b}_200"}
+    assert set(data.ami_usages) == {f"{acct_a}_200", f"{acct_b}_200"}
+    for acct in (acct_a, acct_b):
+        meter_data = coordinator.get_meter_data(f"{acct}_200")
+        assert meter_data is not None
+        assert meter_data.account_id == acct
+        assert meter_data.service_point == "200"
+        assert meter_data.key == f"{acct}_200"
+        assert coordinator.get_latest_ami_usage(f"{acct}_200") is not None

@@ -11,9 +11,9 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorEntityDescription,
 )
-from homeassistant.const import EntityCategory
+from homeassistant.const import EntityCategory, UnitOfEnergy
 
-from .const import _LOGGER, DOMAIN, UNIT_CCF, UNIT_KWH
+from .const import _LOGGER, DOMAIN, UNIT_KWH
 from .entity import NationalGridAccountEntity, NationalGridEntity
 
 PARALLEL_UPDATES = 1
@@ -67,18 +67,26 @@ def _get_energy_usage(
 
 
 def _get_energy_unit(meter_data: MeterData) -> str:
-    """Get the appropriate energy unit based on fuel type."""
+    """Get the appropriate energy unit based on fuel type.
+
+    Gas is reported in therms, not CCF: National Grid's own API fields are
+    literally named THERMS/totalTherms. Gas used to be labeled CCF (a volume
+    unit) here because HA had no native therm unit; the underlying numbers
+    were always therms, just mislabeled.
+    """
     fuel_type = meter_data.meter.get("fuelType", "").upper()
     if fuel_type == "GAS":
-        return UNIT_CCF
+        return UnitOfEnergy.THERM
     return UNIT_KWH
 
 
-def _get_energy_device_class(meter_data: MeterData) -> SensorDeviceClass | None:
-    """Get the device class based on fuel type."""
-    fuel_type = meter_data.meter.get("fuelType", "").upper()
-    if fuel_type == "GAS":
-        return SensorDeviceClass.GAS
+def _get_energy_device_class(_meter_data: MeterData) -> SensorDeviceClass | None:
+    """Get the device class for an energy sensor.
+
+    Always ENERGY, including for gas: therm is an energy unit, and
+    SensorDeviceClass.GAS only accepts volume units. Kept as a MeterData
+    callback to match the device_class_fn interface other descriptions use.
+    """
     return SensorDeviceClass.ENERGY
 
 
@@ -88,7 +96,7 @@ _RATE_WINDOW = 3  # billing cycles to include in blended rate
 def _get_cost_per_unit_unit(meter_data: MeterData) -> str:
     """Return the appropriate cost-per-unit label based on fuel type."""
     fuel_type = meter_data.meter.get("fuelType", "").upper()
-    return "USD/CCF" if fuel_type == "GAS" else "USD/kWh"
+    return "USD/thm" if fuel_type == "GAS" else "USD/kWh"
 
 
 def _get_cost_per_unit(

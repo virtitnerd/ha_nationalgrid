@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from homeassistant.const import UnitOfEnergy
+
 from custom_components.national_grid_us.coordinator import (
     MeterData,
     NationalGridCoordinatorData,
@@ -90,7 +92,7 @@ async def test_import_hourly_stats(mock_get_instance, mock_add_stats, hass) -> N
 @patch("custom_components.national_grid_us.statistics.async_add_external_statistics")
 @patch("custom_components.national_grid_us.statistics.get_instance")
 async def test_import_hourly_stats_gas(mock_get_instance, mock_add_stats, hass) -> None:
-    """Test gas usage values are imported directly as CCF."""
+    """Test gas usage values are imported directly as therms."""
     mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
 
     readings = [{"date": "2025-01-15T10:00:00.000Z", "quantity": 10.0}]
@@ -102,7 +104,10 @@ async def test_import_hourly_stats_gas(mock_get_instance, mock_add_stats, hass) 
 
     await async_import_all_statistics(hass, coordinator)
     assert mock_add_stats.called
+    metadata = mock_add_stats.call_args[0][1]
     stats = mock_add_stats.call_args[0][2]
+    assert metadata["unit_of_measurement"] == UnitOfEnergy.THERM
+    assert metadata["unit_class"] == "energy"
     assert stats[0]["state"] == 10.0
 
 

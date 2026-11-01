@@ -14,10 +14,19 @@ from homeassistant.components.persistent_notification import (
     async_create as pn_create,
 )
 from homeassistant.components.recorder import get_instance as recorder_get_instance
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
+from homeassistant.components.recorder.statistics import (
+    async_update_statistics_metadata,
+)
+from homeassistant.const import (
+    CONF_PASSWORD,
+    CONF_USERNAME,
+    Platform,
+    UnitOfEnergy,
+)
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_track_time_change
+from homeassistant.util.unit_conversion import EnergyConverter
 from sqlalchemy import text as sa_text
 
 from .const import _LOGGER, DOMAIN
@@ -124,6 +133,50 @@ async def _async_migrate_statistics_v1_to_v2(hass: HomeAssistant) -> None:
         )
 
 
+async def _async_migrate_gas_ccf_to_therm(hass: HomeAssistant) -> None:
+    """Relabel gas statistics still marked CCF as therms, keeping their history.
+
+    National Grid's gas usage has always been reported in therms
+    (usageType: THERMS, totalTherms in bill history); this integration used
+    to mislabel it as CCF because Home Assistant had no native therm unit.
+    Only the metadata is wrong, so it is updated in place: the stat_id, sums and
+    Energy Dashboard configuration all stay as they are. This is idempotent:
+    no rows match after the first run.
+    """
+    try:
+        instance = recorder_get_instance(hass)
+    except Exception:  # noqa: BLE001
+        _LOGGER.debug("Recorder not available — skipping gas unit migration")
+        return
+
+    _SELECT_STALE_SQL = (  # noqa: N806
+        "SELECT statistic_id FROM statistics_meta "
+        "WHERE source = 'national_grid_us' "
+        "AND statistic_id LIKE 'national_grid_us:%_gas_hourly_usage' "
+        "AND unit_of_measurement = 'CCF'"
+    )
+
+    def _find_stale() -> list[str]:
+        with instance.get_session() as session:
+            return [row[0] for row in session.execute(sa_text(_SELECT_STALE_SQL))]
+
+    try:
+        stale_ids = await instance.async_add_executor_job(_find_stale)
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("Gas unit migration encountered an error: %s", err)
+        return
+
+    for statistic_id in stale_ids:
+        async_update_statistics_metadata(
+            hass,
+            statistic_id,
+            new_unit_class=EnergyConverter.UNIT_CLASS,
+            new_unit_of_measurement=UnitOfEnergy.THERM,
+        )
+    if stale_ids:
+        _LOGGER.info("Relabeled %d CCF gas statistic series as therms", len(stale_ids))
+
+
 def _warn_if_old_component_present(hass: HomeAssistant) -> None:
     """Fire a persistent notification if the old national_grid folder still exists.
 
@@ -177,6 +230,10 @@ async def async_setup_entry(
     # Rename any statistics left over from the old `national_grid` domain.
     # This is idempotent — zero rows affected after the first run.
     await _async_migrate_statistics_v1_to_v2(hass)
+
+    # Relabel gas statistics still marked CCF as therms (history is kept).
+    # This is idempotent — zero rows affected after the first run.
+    await _async_migrate_gas_ccf_to_therm(hass)
 
     # Run the initial statistics import in the background so setup returns
     # immediately after the coordinator data is fetched.  Writing potentially

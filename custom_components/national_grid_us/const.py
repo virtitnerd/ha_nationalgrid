@@ -11,5 +11,4 @@ ATTRIBUTION = "Data provided by National Grid"
 CONF_SELECTED_ACCOUNTS = "selected_accounts"
 
 # Unit constants.
-UNIT_CCF = "CCF"
 UNIT_KWH = "kWh"

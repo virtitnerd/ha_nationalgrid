@@ -31,6 +31,8 @@ This is a fork of [ryanmorash/ha_nationalgrid](https://github.com/ryanmorash/ha_
 
 > **Upgrading from an earlier version of this fork?** Statistics IDs now include the account ID prefix (e.g., `national_grid_us:1234567890_SP001_electric_hourly_usage`). If you had the old format (`national_grid_us:SP001_electric_hourly_usage`) configured in the Energy Dashboard, you will need to update those references after upgrading. See [Long-Term Statistics](#long-term-statistics) for the new format.
 
+> **Gas is now reported in therms, not CCF.** Requires **Home Assistant 2026.10.0 or later**, which adds native `UnitOfEnergy.THERM` support. National Grid's own API has always reported gas usage in therms (`totalTherms`, `usageType: THERMS`); this integration previously mislabeled it as CCF because Home Assistant had no native therm unit. The underlying numbers are unchanged, only the unit label and device class (now `energy`, not `gas`). On upgrade, existing gas statistics will show a "unit changed" issue in **Developer Tools > Statistics**; this integration also clears the old CCF-labeled gas statistics automatically on first startup after upgrading, so a fresh, correctly-labeled history reimports on the next refresh.
+
 ### HACS (Recommended)
 
 1. Open HACS in your Home Assistant instance.
@@ -117,9 +119,9 @@ These sensors live on the account device and reflect account-level data.
 
 | Entity             | Description                                                          | Unit                       | Device Class |
 | ------------------ | -------------------------------------------------------------------- | -------------------------- | ------------ |
-| Last Billing Usage | Most recent monthly billing usage                                    | kWh (electric) / CCF (gas) | Energy / Gas |
+| Last Billing Usage | Most recent monthly billing usage                                    | kWh (electric) / thm (gas) | Energy       |
 | Last Billing Cost  | Most recent monthly billing cost                                     | USD                        | Monetary     |
-| Avg Cost per Unit  | Blended rate over the last 3 billing cycles (total cost ÷ total usage) | USD/kWh (electric) / USD/CCF (gas) | Monetary |
+| Avg Cost per Unit  | Blended rate over the last 3 billing cycles (total cost ÷ total usage) | USD/kWh (electric) / USD/thm (gas) | Monetary |
 
 ### Binary Sensors
 
@@ -201,7 +203,7 @@ Statistics IDs include the account ID and service point to ensure uniqueness acr
 
 | Statistic ID                                       | Description           | Window   |
 | -------------------------------------------------- | --------------------- | -------- |
-| `national_grid_us:{account_id}_{sp}_gas_hourly_usage` | Gas consumption (CCF) | All available history |
+| `national_grid_us:{account_id}_{sp}_gas_hourly_usage` | Gas consumption (thm) | All available history |
 
 > **Note**: `{account_id}` is your billing account number and `{sp}` is your meter's service point number. Both can be found in the device info for your meter in Home Assistant (e.g., `national_grid_us:1234567890_SP001_electric_hourly_usage`).
 

@@ -88,7 +88,13 @@ def _resolve_hourly_stat_info(
     if is_gas:
         fuel = "gas"
         stat_id = f"{DOMAIN}:{prefix}_{fuel}_hourly_usage"
-        return stat_id, fuel, "CCF", "volume", f"{display} Gas Hourly Usage"
+        return (
+            stat_id,
+            fuel,
+            UnitOfEnergy.THERM,
+            "energy",
+            f"{display} Gas Hourly Usage",
+        )
     fuel = "electric"
     if return_only:
         stat_id = f"{DOMAIN}:{prefix}_{fuel}_return_hourly_usage"

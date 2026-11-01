@@ -436,9 +436,15 @@ async def test_setup_entry_db_error(hass: HomeAssistant) -> None:
 
 
 async def test_setup_entry_runs_statistics_rename(hass: HomeAssistant) -> None:
-    """Test async_setup_entry runs the statistics rename for old national_grid rows."""
-    # Use version=2 so async_migrate_entry is NOT triggered; only async_setup_entry
-    # calls _rename, giving exactly 4 execute calls (3 DELETEs + 1 UPDATE).
+    """Test async_setup_entry runs the statistics migrations on startup.
+
+    Covers both the old national_grid -> national_grid_us rename (3 DELETEs +
+    1 UPDATE) and the gas CCF -> therm relabel (1 SELECT of stale ids, then
+    the recorder's metadata update), for 5 execute calls across the two
+    migrations' own sessions.
+    """
+    # Use version=2 so async_migrate_entry is NOT triggered; only
+    # async_setup_entry's two migrations run.
     entry = MockConfigEntry(
         domain=DOMAIN,
         title=MOCK_USERNAME,
@@ -454,6 +460,9 @@ async def test_setup_entry_runs_statistics_rename(hass: HomeAssistant) -> None:
     mock_instance = MagicMock()
     execute_result = MagicMock()
     execute_result.rowcount = 2
+    execute_result.__iter__.side_effect = lambda: iter(
+        [("national_grid_us:acct_100_gas_hourly_usage",)]
+    )
     session = mock_instance.get_session.return_value.__enter__.return_value
     session.execute.return_value = execute_result
     # async_add_executor_job must actually call the function; a plain MagicMock
@@ -470,14 +479,25 @@ async def test_setup_entry_runs_statistics_rename(hass: HomeAssistant) -> None:
             "custom_components.national_grid_us.recorder_get_instance",
             return_value=mock_instance,
         ),
+        patch(
+            "custom_components.national_grid_us.async_update_statistics_metadata"
+        ) as mock_relabel,
     ):
         await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.LOADED
-    # 3 DELETEs + 1 UPDATE = 4 execute calls
-    assert session.execute.call_count == 4
-    session.commit.assert_called_once()
+    # v1->v2 rename: 3 DELETEs + 1 UPDATE. Gas CCF->therm cleanup: 1 SELECT.
+    assert session.execute.call_count == 5
+    assert session.commit.call_count == 1
+    # Stale series are relabeled in place through the recorder, which keeps
+    # their history; clearing them raced the importer's read of the last sum.
+    mock_relabel.assert_called_once_with(
+        hass,
+        "national_grid_us:acct_100_gas_hourly_usage",
+        new_unit_class="energy",
+        new_unit_of_measurement="thm",
+    )
 
 
 async def test_warn_if_old_component_present(

@@ -5,8 +5,9 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from homeassistant.components.sensor import SensorDeviceClass
+from homeassistant.const import UnitOfEnergy
 
-from custom_components.national_grid_us.const import UNIT_CCF, UNIT_KWH
+from custom_components.national_grid_us.const import UNIT_KWH
 from custom_components.national_grid_us.coordinator import MeterData
 from custom_components.national_grid_us.sensor import (
     ACCOUNT_SENSOR_DESCRIPTIONS,
@@ -63,10 +64,10 @@ def test_energy_usage_electric() -> None:
 
 
 def test_energy_usage_gas_returns_value_directly() -> None:
-    """Test usage value for gas meter returns API value directly (already CCF)."""
+    """Test usage value for gas meter returns API value directly (already therms)."""
     meter_data = _make_meter_data("Gas")
     coordinator = MagicMock()
-    coordinator.get_latest_usage.return_value = {"usage": 10.0, "usageType": "CCF"}
+    coordinator.get_latest_usage.return_value = {"usage": 10.0, "usageType": "THERMS"}
     result = _get_energy_usage(coordinator, meter_data)
 
     assert result == 10.0
@@ -99,9 +100,9 @@ def test_energy_cost_none() -> None:
 
 
 def test_gas_meter_units() -> None:
-    """Test gas meter returns CCF unit."""
+    """Test gas meter returns therm unit."""
     meter_data = _make_meter_data("Gas")
-    assert _get_energy_unit(meter_data) == UNIT_CCF
+    assert _get_energy_unit(meter_data) == UnitOfEnergy.THERM
 
 
 def test_electric_meter_units() -> None:
@@ -111,9 +112,9 @@ def test_electric_meter_units() -> None:
 
 
 def test_gas_device_class() -> None:
-    """Test gas meter returns GAS device class."""
+    """Test gas meter returns ENERGY device class (therm is an energy unit)."""
     meter_data = _make_meter_data("Gas")
-    assert _get_energy_device_class(meter_data) == SensorDeviceClass.GAS
+    assert _get_energy_device_class(meter_data) == SensorDeviceClass.ENERGY
 
 
 def test_electric_device_class() -> None:
@@ -335,7 +336,7 @@ def test_cost_per_unit_unit_electric() -> None:
 
 def test_cost_per_unit_unit_gas() -> None:
     """Test cost per unit label for gas meter uses ISO currency format."""
-    assert _get_cost_per_unit_unit(_make_meter_data_with_fuel("Gas")) == "USD/CCF"
+    assert _get_cost_per_unit_unit(_make_meter_data_with_fuel("Gas")) == "USD/thm"
 
 
 def test_cost_per_unit_in_sensor_descriptions() -> None:
@@ -489,7 +490,7 @@ def test_avg_daily_usage_uses_energy_unit_fn() -> None:
     desc = next(d for d in SENSOR_DESCRIPTIONS if d.key == "last_bill_avg_daily_usage")
     assert desc.unit_fn is not None
     assert desc.unit_fn(_make_meter_data("Electric")) == UNIT_KWH
-    assert desc.unit_fn(_make_meter_data("Gas")) == UNIT_CCF
+    assert desc.unit_fn(_make_meter_data("Gas")) == UnitOfEnergy.THERM
 
 
 def test_get_total_charges_electric() -> None:

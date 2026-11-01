@@ -35,7 +35,7 @@ The integration follows the standard Home Assistant custom component pattern:
 
 - **`data.py`**: `NationalGridConfigEntry` type alias for typed config entries. `entry.runtime_data` is the coordinator directly.
 
-- **`const.py`**: Domain, logger, attribution, `CONF_SELECTED_ACCOUNTS`, and unit constants (`UNIT_KWH`, `UNIT_CCF`).
+- **`const.py`**: Domain, logger, attribution, `CONF_SELECTED_ACCOUNTS`, and unit constants (`UNIT_KWH`). Gas uses `UnitOfEnergy.THERM` from Home Assistant core, not a local constant.
 
 - **`statistics.py`**: Imports long-term statistics into Home Assistant's recorder. `async_import_all_statistics` processes 15-min AMI data for each meter. Creates `national_grid_us:{account_id}_{sp}_electric_hourly_usage` and `national_grid_us:{account_id}_{sp}_gas_hourly_usage` stat series. Supports first-refresh (full import), midnight-refresh (5-day window with backfill continuity), and incremental modes.
 

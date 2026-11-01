@@ -13,6 +13,7 @@ from custom_components.national_grid_us.coordinator import (
 )
 from custom_components.national_grid_us.statistics import (
     _bucket_interval_reads,
+    _import_billed_stats,
     _import_interval_stats_electric,
     _parse_ami_datetime,
     async_import_all_statistics,
@@ -1161,3 +1162,60 @@ async def test_import_billed_stats_gas_without_therm_unit(
 
     ids = [c[0][1]["statistic_id"] for c in mock_add_stats.call_args_list]
     assert ids == ["national_grid_us:acct1_sp1_gas_billed_cost"]
+
+
+@patch("custom_components.national_grid_us.statistics._THERM_SUPPORTED", new=True)
+@patch("custom_components.national_grid_us.statistics.async_add_external_statistics")
+@patch("custom_components.national_grid_us.statistics.get_instance")
+async def test_import_billed_stats_per_account_when_service_points_repeat(
+    mock_get_instance, mock_add_stats, hass
+) -> None:
+    """Test accounts sharing a service point number each get their own series."""
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
+
+    def meter(account_id: str, fuel_type: str) -> MeterData:
+        return MeterData(
+            account_id=account_id,
+            meter={
+                "fuelType": fuel_type,
+                "servicePointNumber": "200",
+                "hasAmiSmartMeter": False,
+            },
+            billing_account={"billingAccountId": account_id},
+        )
+
+    coordinator = _make_billed_coordinator(
+        meters={
+            "acct1_200": meter("acct1", "Gas"),
+            "acct2_200": meter("acct2", "Gas"),
+            "acct2_300": meter("acct2", "Water"),
+        },
+        gas_bills=[_gas_bill("2025-01-06", "2025-02-05", 60.0, 90.0)],
+    )
+    coordinator.data.gas_bill_history["acct2"] = [
+        _gas_bill("2025-01-06", "2025-02-05", 30.0, 45.0)
+    ]
+
+    await async_import_all_statistics(hass, coordinator)
+
+    sums = {
+        c[0][1]["statistic_id"]: c[0][2][-1]["sum"]
+        for c in mock_add_stats.call_args_list
+    }
+    assert sums == {
+        "national_grid_us:acct1_200_gas_billed_cost": 90.0,
+        "national_grid_us:acct1_200_gas_billed_usage": 60.0,
+        "national_grid_us:acct2_200_gas_billed_cost": 45.0,
+        "national_grid_us:acct2_200_gas_billed_usage": 30.0,
+    }
+
+
+async def test_import_billed_stats_without_data(hass) -> None:
+    """Test billed statistics are skipped until the coordinator has data."""
+    coordinator = MagicMock()
+    coordinator.data = None
+    with patch(
+        "custom_components.national_grid_us.statistics.async_add_external_statistics"
+    ) as mock_add:
+        await _import_billed_stats(hass, coordinator)
+    assert not mock_add.called

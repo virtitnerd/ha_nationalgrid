@@ -825,13 +825,15 @@ async def _import_billed_stats(
         return
 
     candidates: dict[tuple[str, str], list[str]] = {}
-    for sp, meter_data in data.meters.items():
-        if meter_data.meter.get("hasAmiSmartMeter") or sp in data.ami_usages:
+    for key, meter_data in data.meters.items():
+        if meter_data.meter.get("hasAmiSmartMeter") or key in data.ami_usages:
             continue
         fuel_type = str(meter_data.meter.get("fuelType", ""))
         if fuel_type not in _BILLED_QUANTITY_FIELDS:
             continue
-        candidates.setdefault((meter_data.account_id, fuel_type), []).append(sp)
+        candidates.setdefault((meter_data.account_id, fuel_type), []).append(
+            meter_data.service_point
+        )
 
     for (account_id, fuel_type), service_points in candidates.items():
         if len(service_points) > 1:

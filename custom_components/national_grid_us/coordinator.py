@@ -21,6 +21,7 @@ from py_nationalgrid.exceptions import (
 from .const import _LOGGER, CONF_SELECTED_ACCOUNTS, DOMAIN
 
 if TYPE_CHECKING:
+    import asyncio
     import logging
 
     from homeassistant.core import HomeAssistant
@@ -130,6 +131,7 @@ class NationalGridDataUpdateCoordinator(
         )
         self._previous_update_success = True
         self._is_first_refresh = True
+        self.import_task: asyncio.Task[None] | None = None
         self._interval_only_mode = False  # When True, only fetch interval reads
         self._is_midnight_refresh = False  # When True, force full hourly import
         self._pending_full_refresh = False  # Retry flag for failed full refreshes

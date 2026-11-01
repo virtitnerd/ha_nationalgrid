@@ -168,8 +168,8 @@ async def test_force_refresh_service_triggers_coordinator(
         )
         await hass.async_block_till_done()
 
-    # Statistics import should have been called again after the service call
-    assert mock_stats.called
+    # One import per service call: the update listener's, which the service awaits
+    assert mock_stats.call_count == 1
 
 
 async def test_force_refresh_service_with_specific_entry_id(

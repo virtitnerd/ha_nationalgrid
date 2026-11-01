@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="custom_components/national_grid_us/brand/icon.png" alt="National Grid US" width="96">
+</p>
+
 # National Grid US Integration
 
 [![GitHub Release](https://img.shields.io/github/v/release/virtitnerd/ha_nationalgrid?style=flat-square)](https://github.com/virtitnerd/ha_nationalgrid/releases)
@@ -7,7 +11,7 @@
 
 A custom [Home Assistant](https://www.home-assistant.io/) integration that provides energy usage, cost, billing, and 15-minute AMI meter data from [National Grid](https://www.nationalgridus.com/) utility accounts. It uses the [py-nationalgrid](https://github.com/virtitnerd/py-nationalgrid) library to communicate with National Grid's API.
 
-This is a fork of [ryanmorash/ha_nationalgrid](https://github.com/ryanmorash/ha_nationalgrid), updated to use the actively maintained `py-nationalgrid` library and rebuilt around the 15-minute AMI data endpoint.
+This is an unofficial integration. It is not affiliated with or endorsed by National Grid, and National Grid's name and logo belong to their owners.
 
 ## Features
 
@@ -29,9 +33,9 @@ This is a fork of [ryanmorash/ha_nationalgrid](https://github.com/ryanmorash/ha_
 
 > **Migrating from the original integration?** Uninstall `ryanmorash/ha_nationalgrid` from HACS and remove the integration entry from **Settings > Devices & Services** before installing this one. Both use the same domain (`national_grid`), so they cannot coexist.
 
-> **Upgrading from an earlier version of this fork?** Statistics IDs now include the account ID prefix (e.g., `national_grid_us:1234567890_SP001_electric_hourly_usage`). If you had the old format (`national_grid_us:SP001_electric_hourly_usage`) configured in the Energy Dashboard, you will need to update those references after upgrading. See [Long-Term Statistics](#long-term-statistics) for the new format.
+> **Upgrading from an earlier version of this integration?** Statistics IDs now include the account ID prefix (e.g., `national_grid_us:1234567890_SP001_electric_hourly_usage`). If you had the old format (`national_grid_us:SP001_electric_hourly_usage`) configured in the Energy Dashboard, you will need to update those references after upgrading. See [Long-Term Statistics](#long-term-statistics) for the new format.
 
-> **Gas is now reported in therms, not CCF.** Requires **Home Assistant 2026.10.0 or later**, which adds native `UnitOfEnergy.THERM` support. National Grid's own API has always reported gas usage in therms (`totalTherms`, `usageType: THERMS`); this integration previously mislabeled it as CCF because Home Assistant had no native therm unit. The underlying numbers are unchanged, only the unit label and device class (now `energy`, not `gas`). On upgrade, existing gas statistics will show a "unit changed" issue in **Developer Tools > Statistics**; this integration also clears the old CCF-labeled gas statistics automatically on first startup after upgrading, so a fresh, correctly-labeled history reimports on the next refresh.
+> **Gas is now reported in therms, not CCF.** Requires **Home Assistant 2026.11.0b0 or later** (2026.11.0 once it is released), because the Energy dashboard shows a therm gas source in therms only from the 2026.11 frontend. National Grid's own API has always reported gas usage in therms (`totalTherms`, `usageType: THERMS`); this integration previously mislabeled it as CCF because Home Assistant had no native therm unit. The underlying numbers are unchanged, only the unit label and device class (now `energy`, not `gas`). On the first startup after upgrading, existing CCF-labeled gas statistics are relabeled as therms in place, so their history and your Energy dashboard setup are kept.
 
 ### HACS (Recommended)
 
@@ -216,7 +220,7 @@ Meters whose **Smart Meter** binary sensor is off have no hourly data. For these
 | `national_grid_us:{account_id}_{sp}_gas_billed_usage`      | Billed consumption (therms) |
 | `national_grid_us:{account_id}_{sp}_gas_billed_cost`       | Billed cost (USD)           |
 
-Use the cost statistic with **Use an entity tracking the total costs**. Gas billed usage needs a Home Assistant release with the therm energy unit; on older releases only the cost is imported. Billed statistics are skipped for an account with more than one non-smart meter of the same fuel, since National Grid reports bill history per account.
+Use the cost statistic with **Use an entity tracking the total costs**. Billed statistics are skipped for an account with more than one non-smart meter of the same fuel, since National Grid reports bill history per account.
 
 > **Note**: `{account_id}` is your billing account number and `{sp}` is your meter's service point number. Both can be found in the device info for your meter in Home Assistant (e.g., `national_grid_us:1234567890_SP001_electric_hourly_usage`).
 
@@ -285,3 +289,7 @@ logger:
     custom_components.national_grid_us: debug
     py_nationalgrid: debug
 ```
+
+## Credits
+
+Originally based on [ryanmorash/ha_nationalgrid](https://github.com/ryanmorash/ha_nationalgrid) (archived). It now uses the actively maintained [py-nationalgrid](https://github.com/virtitnerd/py-nationalgrid) library and is built around National Grid's 15-minute AMI data endpoint. Thanks to everyone who has contributed fixes and reports.

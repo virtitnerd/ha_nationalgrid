@@ -259,6 +259,14 @@ def test_parse_ami_datetime_top_of_hour() -> None:
     assert dt.tzinfo is not None
 
 
+def test_parse_ami_datetime_uses_each_records_offset_across_fall_back() -> None:
+    """Test local offsets are honoured when the clocks go back on 2026-11-01."""
+    before = _parse_ami_datetime("2026-11-01T01:00:00.000-04:00")
+    after = _parse_ami_datetime("2026-11-01T01:15:00.000-05:00")
+    assert before == datetime(2026, 11, 1, 5, 0, tzinfo=UTC)
+    assert after == datetime(2026, 11, 1, 6, 15, tzinfo=UTC)
+
+
 def test_parse_ami_datetime_bad_input() -> None:
     """Test that unparseable dates return None."""
     assert _parse_ami_datetime("not-a-date") is None

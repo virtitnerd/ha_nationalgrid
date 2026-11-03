@@ -113,8 +113,10 @@ def _resolve_hourly_stat_info(
 def _parse_ami_datetime(date_str: str) -> datetime | None:
     """Parse an API date string into a UTC datetime, preserving 15-min precision.
 
-    Handles both AMI timestamps ("2026-01-31T23:15:00.000Z") and interval-read
-    timestamps ("2026-01-22T13:00:00-05:00"). All results are normalised to UTC.
+    The API stamps AMI and interval-read records with the local UTC offset
+    ("2026-11-01T01:15:00.000-05:00"); a "Z" suffix is also accepted. Each record
+    is converted using its own offset, which keeps the repeated hour on the
+    fall-back day distinct. All results are normalised to UTC.
     Sub-second precision is stripped; the minute is preserved so 15-min
     interval boundaries are maintained in statistics.
     """

@@ -7,11 +7,19 @@
 [![GitHub Release](https://img.shields.io/github/v/release/virtitnerd/ha_nationalgrid?style=flat-square)](https://github.com/virtitnerd/ha_nationalgrid/releases)
 [![License](https://img.shields.io/github/license/virtitnerd/ha_nationalgrid?style=flat-square)](LICENSE)
 [![Last Commit](https://img.shields.io/github/last-commit/virtitnerd/ha_nationalgrid?style=flat-square)](https://github.com/virtitnerd/ha_nationalgrid/commits/main)
-[![Open in the Home Assistant Marketplace](https://img.shields.io/badge/Marketplace-Custom-orange.svg?style=flat-square)](https://my.home-assistant.io/redirect/hacs_repository/?owner=virtitnerd&repository=ha_nationalgrid&category=integration)
 
 A custom [Home Assistant](https://www.home-assistant.io/) integration that provides energy usage, cost, billing, and 15-minute AMI meter data from [National Grid](https://www.nationalgridus.com/) utility accounts. It uses the [py-nationalgrid](https://github.com/virtitnerd/py-nationalgrid) library to communicate with National Grid's API.
 
 This is an unofficial integration. It is not affiliated with or endorsed by National Grid, and National Grid's name and logo belong to their owners.
+
+## Quick Install
+
+Requires **Home Assistant 2026.11.0 or later**. Two buttons, in order:
+
+1. [![Open your Home Assistant instance and show this repository in the Marketplace.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=virtitnerd&repository=ha_nationalgrid&category=integration) Add it to the Marketplace and install it.
+2. [![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=national_grid_us) Set it up with your National Grid login.
+
+The buttons open your own Home Assistant. The first time, [My Home Assistant](https://my.home-assistant.io/) asks for your instance address. Steps without the buttons are under [Installation](#installation).
 
 ## Features
 
@@ -59,7 +67,7 @@ Releases are published as GitHub releases, so you can also pick an earlier versi
 
 Configuration is done entirely through the Home Assistant UI.
 
-1. Go to **Settings > Devices & Services > Add Integration**.
+1. Select the setup button above, or go to **Settings > Devices & Services > Add Integration**.
 2. Search for **National Grid**.
 3. Enter your National Grid account **username** and **password**.
 4. Select which billing accounts to monitor from the list of accounts linked to your login.

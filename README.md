@@ -5,6 +5,7 @@
 # National Grid US Integration
 
 [![GitHub Release](https://img.shields.io/github/v/release/virtitnerd/ha_nationalgrid?style=flat-square)](https://github.com/virtitnerd/ha_nationalgrid/releases)
+[![Downloads](https://img.shields.io/github/downloads/virtitnerd/ha_nationalgrid/total?style=flat-square)](https://github.com/virtitnerd/ha_nationalgrid/releases)
 [![License](https://img.shields.io/github/license/virtitnerd/ha_nationalgrid?style=flat-square)](LICENSE)
 [![Last Commit](https://img.shields.io/github/last-commit/virtitnerd/ha_nationalgrid?style=flat-square)](https://github.com/virtitnerd/ha_nationalgrid/commits/main)
 

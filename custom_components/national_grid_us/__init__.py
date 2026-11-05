@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import voluptuous as vol
+import probatio
 from homeassistant.components.persistent_notification import (
     async_create as pn_create,
 )
@@ -50,9 +50,9 @@ PLATFORMS: list[Platform] = [
 SERVICE_FORCE_REFRESH = "force_full_refresh"
 
 # Service schemas
-SERVICE_FORCE_REFRESH_SCHEMA = vol.Schema(
+SERVICE_FORCE_REFRESH_SCHEMA = probatio.Schema(
     {
-        vol.Optional("entry_id"): cv.string,
+        probatio.Optional("entry_id"): cv.string,
     }
 )
 

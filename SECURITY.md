@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Only the latest release of the National Grid US integration receives security fixes. Please update to the newest version through HACS before reporting a problem.
+Only the latest release of the National Grid US integration receives security fixes. Please update to the newest version through the Marketplace (HACS) before reporting a problem.
 
 ## Reporting a vulnerability
 
@@ -24,7 +24,7 @@ This project is maintained by one person, so replies are on a best-effort basis.
 
 In scope: the code in this repository, including how the integration stores credentials, logs data, and handles diagnostics.
 
-Out of scope: National Grid's own website and services, Home Assistant core, and HACS. Please report those to their owners.
+Out of scope: National Grid's own website and services, Home Assistant core, and the Marketplace. Please report those to their owners.
 
 ## Dependencies
 

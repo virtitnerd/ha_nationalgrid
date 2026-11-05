@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import voluptuous as vol
+import probatio
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.helpers import selector
@@ -83,17 +83,19 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema(
+            data_schema=probatio.Schema(
                 {
-                    vol.Required(
+                    probatio.Required(
                         CONF_USERNAME,
-                        default=(user_input or {}).get(CONF_USERNAME, vol.UNDEFINED),
+                        default=(user_input or {}).get(
+                            CONF_USERNAME, probatio.UNDEFINED
+                        ),
                     ): selector.TextSelector(
                         selector.TextSelectorConfig(
                             type=selector.TextSelectorType.TEXT,
                         ),
                     ),
-                    vol.Required(CONF_PASSWORD): selector.TextSelector(
+                    probatio.Required(CONF_PASSWORD): selector.TextSelector(
                         selector.TextSelectorConfig(
                             type=selector.TextSelectorType.PASSWORD,
                         ),
@@ -181,7 +183,7 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         schema = (
             self._get_account_selection_schema(current_selection=current_selection)
             if self._accounts
-            else vol.Schema({})
+            else probatio.Schema({})
         )
         return self.async_show_form(
             step_id="reconfigure",
@@ -232,17 +234,17 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="reauth_confirm",
-            data_schema=vol.Schema(
+            data_schema=probatio.Schema(
                 {
-                    vol.Required(
+                    probatio.Required(
                         CONF_USERNAME,
-                        default=self._username or vol.UNDEFINED,
+                        default=self._username or probatio.UNDEFINED,
                     ): selector.TextSelector(
                         selector.TextSelectorConfig(
                             type=selector.TextSelectorType.TEXT,
                         ),
                     ),
-                    vol.Required(CONF_PASSWORD): selector.TextSelector(
+                    probatio.Required(CONF_PASSWORD): selector.TextSelector(
                         selector.TextSelectorConfig(
                             type=selector.TextSelectorType.PASSWORD,
                         ),
@@ -254,7 +256,7 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
     def _get_account_selection_schema(
         self, current_selection: list[str] | None = None
-    ) -> vol.Schema:
+    ) -> probatio.Schema:
         """Get the schema for account selection, optionally pre-filling a selection."""
         account_options = []
         for account in self._accounts:
@@ -269,12 +271,12 @@ class NationalGridFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         field = (
-            vol.Required(CONF_SELECTED_ACCOUNTS, default=current_selection)
+            probatio.Required(CONF_SELECTED_ACCOUNTS, default=current_selection)
             if current_selection
-            else vol.Required(CONF_SELECTED_ACCOUNTS)
+            else probatio.Required(CONF_SELECTED_ACCOUNTS)
         )
 
-        return vol.Schema(
+        return probatio.Schema(
             {
                 field: selector.SelectSelector(
                     selector.SelectSelectorConfig(

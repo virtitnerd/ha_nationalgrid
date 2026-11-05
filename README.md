@@ -7,7 +7,7 @@
 [![GitHub Release](https://img.shields.io/github/v/release/virtitnerd/ha_nationalgrid?style=flat-square)](https://github.com/virtitnerd/ha_nationalgrid/releases)
 [![License](https://img.shields.io/github/license/virtitnerd/ha_nationalgrid?style=flat-square)](LICENSE)
 [![Last Commit](https://img.shields.io/github/last-commit/virtitnerd/ha_nationalgrid?style=flat-square)](https://github.com/virtitnerd/ha_nationalgrid/commits/main)
-[![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg?style=flat-square)](https://hacs.xyz/)
+[![Open in the Home Assistant Marketplace](https://img.shields.io/badge/Marketplace-Custom-orange.svg?style=flat-square)](https://my.home-assistant.io/redirect/hacs_repository/?owner=virtitnerd&repository=ha_nationalgrid&category=integration)
 
 A custom [Home Assistant](https://www.home-assistant.io/) integration that provides energy usage, cost, billing, and 15-minute AMI meter data from [National Grid](https://www.nationalgridus.com/) utility accounts. It uses the [py-nationalgrid](https://github.com/virtitnerd/py-nationalgrid) library to communicate with National Grid's API.
 
@@ -31,20 +31,23 @@ This is an unofficial integration. It is not affiliated with or endorsed by Nati
 
 ## Installation
 
-> **Migrating from the original integration?** Uninstall `ryanmorash/ha_nationalgrid` from HACS and remove the integration entry from **Settings > Devices & Services** before installing this one. Both use the same domain (`national_grid`), so they cannot coexist.
+> **Migrating from the original integration?** Uninstall `ryanmorash/ha_nationalgrid` from the Marketplace (HACS) and remove the integration entry from **Settings > Devices & Services** before installing this one. Both use the same domain (`national_grid`), so they cannot coexist.
 
 > **Upgrading from an earlier version of this integration?** Statistics IDs now include the account ID prefix (e.g., `national_grid_us:1234567890_SP001_electric_hourly_usage`). If you had the old format (`national_grid_us:SP001_electric_hourly_usage`) configured in the Energy Dashboard, you will need to update those references after upgrading. See [Long-Term Statistics](#long-term-statistics) for the new format.
 
-> **Gas is now reported in therms, not CCF.** Requires **Home Assistant 2026.11.0b0 or later** (2026.11.0 once it is released), because the Energy dashboard shows a therm gas source in therms only from the 2026.11 frontend. National Grid's own API has always reported gas usage in therms (`totalTherms`, `usageType: THERMS`); this integration previously mislabeled it as CCF because Home Assistant had no native therm unit. The underlying numbers are unchanged, only the unit label and device class (now `energy`, not `gas`). On the first startup after upgrading, existing CCF-labeled gas statistics are relabeled as therms in place, so their history and your Energy dashboard setup are kept.
+> **Gas is now reported in therms, not CCF.** Requires **Home Assistant 2026.11.0 or later**, because the Energy dashboard shows a therm gas source in therms only from the 2026.11 frontend. National Grid's own API has always reported gas usage in therms (`totalTherms`, `usageType: THERMS`); this integration previously mislabeled it as CCF because Home Assistant had no native therm unit. The underlying numbers are unchanged, only the unit label and device class (now `energy`, not `gas`). On the first startup after upgrading, existing CCF-labeled gas statistics are relabeled as therms in place, so their history and your Energy dashboard setup are kept.
 
-### HACS (Recommended)
+### Marketplace (Recommended)
 
-1. Open HACS in your Home Assistant instance.
-2. Go to **Integrations** and select the three-dot menu in the top right corner.
-3. Select **Custom repositories**.
-4. Add the URL `https://github.com/virtitnerd/ha_nationalgrid` with category **Integration**.
-5. Find **National Grid** in the HACS integration list and click **Download**.
-6. Restart Home Assistant.
+HACS is built into Home Assistant 2026.11 as the **Marketplace**, so there is nothing separate to install. If you already used HACS, your installed projects and custom repositories carried over when you updated.
+
+[![Open your Home Assistant instance and open this repository in the Marketplace.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=virtitnerd&repository=ha_nationalgrid&category=integration)
+
+1. In Home Assistant, open **Settings > Marketplace** and accept the community-projects notice.
+2. Select **Add from link** and enter `https://github.com/virtitnerd/ha_nationalgrid`. Custom repositories need a GitHub connection through device sign-in, which only reads public information.
+3. Find **National Grid** and install it. A first install goes straight to the setup flow without a restart; later updates do need a restart.
+
+Releases are published as GitHub releases, so you can also pick an earlier version from the repository's menu in the Marketplace. Turn on the repository's **Pre-release** switch if you want betas.
 
 ### Manual Installation
 

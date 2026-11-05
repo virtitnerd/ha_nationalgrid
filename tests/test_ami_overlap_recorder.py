@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.statistics import statistics_during_period
-from pytest_homeassistant_custom_component.components.recorder.common import (
+from pytest_homeassistant.components.recorder.common import (
     async_wait_recording_done,
 )
 

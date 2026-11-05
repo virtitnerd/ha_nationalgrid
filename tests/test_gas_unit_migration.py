@@ -9,7 +9,7 @@ from homeassistant.components.recorder.statistics import (
     get_last_statistics,
     get_metadata,
 )
-from pytest_homeassistant_custom_component.components.recorder.common import (
+from pytest_homeassistant.components.recorder.common import (
     async_wait_recording_done,
 )
 

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.national_grid_us.const import DOMAIN
 from custom_components.national_grid_us.coordinator import MeterData

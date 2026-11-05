@@ -241,7 +241,7 @@ async def async_setup_entry(
     # would otherwise block the config-flow UI until it finishes.
     hass.async_create_task(async_import_all_statistics(hass, coordinator))
 
-    # Pre-register Account devices so via_device links resolve correctly when
+    # Pre-register Account devices so via_device_id links resolve correctly when
     # Meter entities from other platforms (binary_sensor, button) are registered.
     registry = dr.async_get(hass)
     for account_id in coordinator.data.accounts:

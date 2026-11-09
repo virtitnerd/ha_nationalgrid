@@ -10,5 +10,5 @@ addopts = "-p no:respx --cov=custom_components/national_grid_us --cov-report=ter
 
 [dependency-groups]
 dev = [
-    "ruff>=0.17.3",
+    "ruff>=0.17.4",
 ]

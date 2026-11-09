@@ -13,6 +13,12 @@ For meters without an AMI smart meter:
 - Billed usage and cost from bill history, spread evenly across each billing
   period's days (daily stats). Bill totals are real; daily values are estimates.
 
+For meters with AMI data:
+- Hourly cost stats paired with each consumption usage series (hourly, and
+  interval for electric): each hour's usage times the blended rate of the bill
+  covering it (total charges / billed usage). Hours after the newest bill use the
+  blended rate of the most recent bills and are repriced once their bill arrives.
+
 Import strategy:
 - First refresh: Import all 15-min records available (typically ~45 days)
 - Midnight refresh: Import all records in the 5-day window, continuing cumulative
@@ -24,6 +30,8 @@ from __future__ import annotations
 
 import asyncio
 import re
+from bisect import bisect_right
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from functools import partial
 from typing import TYPE_CHECKING
@@ -54,6 +62,8 @@ except ImportError:  # pragma: no cover
     HAS_MEAN_TYPE = False  # pragma: no cover
 
 if TYPE_CHECKING:  # pragma: no cover
+    from collections.abc import Iterable
+
     from homeassistant.core import HomeAssistant
 
     from .coordinator import NationalGridDataUpdateCoordinator
@@ -252,6 +262,9 @@ async def async_import_all_statistics(
 
     # Import billed usage/cost for meters without AMI data
     await _import_billed_stats(hass, coordinator)
+
+    # Price the AMI usage series imported above (reads them back from recorder)
+    await _import_ami_cost_stats(hass, coordinator)
 
     _LOGGER.info("Statistics import complete")
 
@@ -820,28 +833,17 @@ async def _import_billed_stats(
     if data is None:
         return
 
-    candidates: dict[tuple[str, str], list[str]] = {}
-    for key, meter_data in data.meters.items():
-        if meter_data.meter.get("hasAmiSmartMeter") or key in data.ami_usages:
-            continue
-        fuel_type = str(meter_data.meter.get("fuelType", ""))
-        if fuel_type not in _BILLED_QUANTITY_FIELDS:
-            continue
-        candidates.setdefault((meter_data.account_id, fuel_type), []).append(
-            meter_data.service_point
-        )
+    non_ami_keys = [
+        key
+        for key, meter_data in data.meters.items()
+        if not meter_data.meter.get("hasAmiSmartMeter") and key not in data.ami_usages
+    ]
+    candidates = _single_meter_per_account_fuel(
+        coordinator, non_ami_keys, "without AMI", "billed"
+    )
 
-    for (account_id, fuel_type), service_points in candidates.items():
-        if len(service_points) > 1:
-            _LOGGER.warning(
-                "Account %s has %s %s meters without AMI; billed usage cannot "
-                "be split between them, skipping billed statistics",
-                account_id,
-                len(service_points),
-                fuel_type,
-            )
-            continue
-        sp = service_points[0]
+    for (account_id, fuel_type), key in candidates.items():
+        sp = data.meters[key].service_point
         is_gas = fuel_type == "Gas"
         history = (data.gas_bill_history if is_gas else data.electric_bill_history).get(
             account_id, []
@@ -940,3 +942,270 @@ async def _get_sum_before(
     if stats.get(statistic_id):
         return stats[statistic_id][-1].get("sum") or 0.0
     return 0.0
+
+
+def _single_meter_per_account_fuel(
+    coordinator: NationalGridDataUpdateCoordinator,
+    keys: Iterable[str],
+    meter_label: str,
+    stats_label: str,
+) -> dict[tuple[str, str], str]:
+    """Group meter keys by (account, fuelType), keeping only single-meter groups.
+
+    Bill history is reported per account and fuel type, so it cannot be
+    attributed to one meter when an account has several of that fuel. Those
+    groups are skipped with one warning each.
+    """
+    data = coordinator.data
+    groups: dict[tuple[str, str], list[str]] = {}
+    for key in keys:
+        meter_data = data.meters.get(key)
+        if meter_data is None:
+            continue
+        fuel_type = str(meter_data.meter.get("fuelType", ""))
+        if fuel_type not in _BILLED_QUANTITY_FIELDS:
+            continue
+        groups.setdefault((meter_data.account_id, fuel_type), []).append(key)
+
+    single: dict[tuple[str, str], str] = {}
+    for (account_id, fuel_type), group_keys in groups.items():
+        if len(group_keys) > 1:
+            _LOGGER.warning(
+                "Account %s has %s %s meters %s; bill history cannot be "
+                "attributed to one of them, skipping %s statistics",
+                account_id,
+                len(group_keys),
+                fuel_type,
+                meter_label,
+                stats_label,
+            )
+            continue
+        single[(account_id, fuel_type)] = group_keys[0]
+    return single
+
+
+# --- AMI cost statistics -----------------------------------------------------
+
+# Rewritten on a normal refresh. Must exceed one billing period plus the delay
+# before its bill is published, so estimated hours get repriced.
+COST_REPRICE_WINDOW = timedelta(days=75)
+# Bills averaged for hours not yet covered by a bill.
+RECENT_BILLS_FOR_ESTIMATE = 3
+
+
+@dataclass(frozen=True)
+class Bill:
+    """One billing period, normalized from the bill history."""
+
+    start: date  # readFromDate, inclusive
+    end: date  # readDate, exclusive
+    cost: float  # totalCharges, USD
+    usage: float  # billed quantity, same unit as the usage statistic
+
+
+def _bills_from_history(records: list, quantity_field: str) -> list[Bill]:
+    """Build Bill objects from bill history records.
+
+    Reads the same fields as `_spread_bills_by_day`: readFromDate/readDate for
+    the period, totalCharges for cost and the fuel's billed quantity field.
+    """
+    bills: list[Bill] = []
+    for record in records or []:
+        start = _parse_bill_date(str(record.get("readFromDate", "")))
+        end = _parse_bill_date(str(record.get("readDate", "")))
+        cost = record.get("totalCharges")
+        usage = record.get(quantity_field)
+        if start is None or end is None or cost is None or usage is None:
+            continue
+        try:
+            bills.append(Bill(start, end, float(cost), float(usage)))
+        except TypeError, ValueError:
+            continue
+    return bills
+
+
+class RateTable:
+    """Look up the blended $/unit rate for a local calendar day."""
+
+    def __init__(self, bills: Iterable[Bill]) -> None:
+        """Keep usable bills sorted by start date."""
+        self._bills = sorted(
+            (b for b in bills if b.usage > 0 and b.end > b.start),
+            key=lambda b: b.start,
+        )
+        self._starts = [b.start for b in self._bills]
+        recent = self._bills[-RECENT_BILLS_FOR_ESTIMATE:]
+        usage = sum(b.usage for b in recent)
+        self.estimate: float | None = (
+            sum(b.cost for b in recent) / usage if usage > 0 else None
+        )
+
+    def __bool__(self) -> bool:
+        """Return True when at least one bill can be priced."""
+        return self.estimate is not None
+
+    def rate_for(self, day: date) -> float:
+        """Rate of the bill covering `day`.
+
+        After the newest bill: the recent-bills estimate. Before the oldest
+        bill: the oldest bill's rate. In a gap between bills: the preceding
+        bill's rate.
+        """
+        if self.estimate is None:
+            msg = "RateTable has no usable bills"
+            raise ValueError(msg)
+        idx = bisect_right(self._starts, day) - 1
+        if idx < 0:
+            first = self._bills[0]
+            return first.cost / first.usage
+        bill = self._bills[idx]
+        if idx == len(self._bills) - 1 and day >= bill.end:
+            return self.estimate
+        return bill.cost / bill.usage
+
+
+def build_cost_rows(
+    usage: Iterable[tuple[datetime, float]],
+    rates: RateTable,
+    start_sum: float,
+) -> list[StatisticData]:
+    """Turn hourly usage changes into cumulative cost statistic rows."""
+    rows: list[StatisticData] = []
+    running = start_sum
+    for start, change in usage:
+        cost = change * rates.rate_for(dt_util.as_local(start).date())
+        running += cost
+        rows.append(StatisticData(start=start, state=cost, sum=running))
+    return rows
+
+
+def cost_statistic_id(usage_statistic_id: str) -> str:
+    """Map `..._hourly_usage` to `..._hourly_cost` (and interval likewise)."""
+    if not usage_statistic_id.endswith("_usage"):
+        msg = f"Not a usage statistic: {usage_statistic_id}"
+        raise ValueError(msg)
+    return usage_statistic_id.removesuffix("_usage") + "_cost"
+
+
+async def _hourly_changes(
+    hass: HomeAssistant, statistic_id: str, start: datetime, end: datetime
+) -> list[tuple[datetime, float]]:
+    """Return (hour start, change) for each stored hour of a usage statistic."""
+    result = await get_instance(hass).async_add_executor_job(
+        partial(
+            statistics_during_period,
+            hass,
+            start,
+            end,
+            {statistic_id},
+            "hour",
+            None,
+            {"change"},
+        )
+    )
+    return [
+        (datetime.fromtimestamp(row["start"], tz=UTC), row["change"])
+        for row in result.get(statistic_id, [])
+        if row.get("change") is not None
+    ]
+
+
+async def async_import_cost_statistics(  # noqa: PLR0913
+    hass: HomeAssistant,
+    *,
+    usage_statistic_id: str,
+    name: str,
+    bills: Iterable[Bill],
+    full_refresh: bool,
+    replace_series: bool = False,
+) -> None:
+    """Rewrite the cost statistic that mirrors `usage_statistic_id`.
+
+    The usage statistic must already be committed to the recorder. With
+    `replace_series` (the interval series, which is cleared and reimported on
+    every refresh) the cost twin is cleared and rebuilt the same way. Otherwise
+    only `COST_REPRICE_WINDOW` is rewritten (everything on a full refresh) and
+    the sum continues from the last cost row before the window.
+    """
+    rates = RateTable(bills)
+    if not rates:
+        _LOGGER.debug("No usable bills; skipping cost for %s", usage_statistic_id)
+        return
+
+    cost_id = cost_statistic_id(usage_statistic_id)
+    now = dt_util.utcnow()
+
+    if replace_series or full_refresh:
+        window_start = datetime.fromtimestamp(0, tz=UTC)
+        start_sum = 0.0
+    else:
+        window_start = (now - COST_REPRICE_WINDOW).replace(
+            minute=0, second=0, microsecond=0
+        )
+        start_sum = await _get_sum_before(hass, cost_id, window_start)
+
+    usage = await _hourly_changes(hass, usage_statistic_id, window_start, now)
+    if replace_series:
+        get_instance(hass).async_clear_statistics([cost_id])
+        await asyncio.sleep(0)
+    if not usage:
+        return
+
+    rows = build_cost_rows(usage, rates, start_sum)
+    metadata = _build_statistic_metadata(cost_id, name, None, None)
+    async_add_external_statistics(hass, metadata, rows)
+    _LOGGER.info(
+        "Imported %s hourly cost stats for %s (sum=%.2f)",
+        len(rows),
+        cost_id,
+        rows[-1]["sum"],
+    )
+
+
+async def _import_ami_cost_stats(
+    hass: HomeAssistant,
+    coordinator: NationalGridDataUpdateCoordinator,
+) -> None:
+    """Import cost statistics for each AMI meter's consumption series.
+
+    Skips a fuel type when the account has more than one AMI meter of it, like
+    the billed series do. Return-to-grid series are not priced.
+    """
+    data = coordinator.data
+    candidates = _single_meter_per_account_fuel(
+        coordinator, data.ami_usages, "with AMI", "cost"
+    )
+    jobs: list[tuple[str, str, list[Bill], bool]] = []
+    for (account_id, fuel_type), key in candidates.items():
+        is_gas = fuel_type == "Gas"
+        history = (data.gas_bill_history if is_gas else data.electric_bill_history).get(
+            account_id, []
+        )
+        bills = _bills_from_history(history, _BILLED_QUANTITY_FIELDS[fuel_type])
+        if not RateTable(bills):
+            continue
+        sp = data.meters[key].service_point
+        hourly_id, *_ = _resolve_hourly_stat_info(
+            sp, account_id, is_gas=is_gas, return_only=False
+        )
+        display = f"{account_id}-{sp}"
+        jobs.append((hourly_id, f"{display} {fuel_type} Hourly Cost", bills, False))
+        if not is_gas and key in data.interval_reads:
+            interval_id = f"{DOMAIN}:{account_id}_{sp}_electric_interval_usage"
+            jobs.append((interval_id, f"{display} Electric Interval Cost", bills, True))
+
+    if not jobs:
+        return
+
+    # Usage rows are queued on the recorder; wait so they can be read back.
+    await get_instance(hass).async_block_till_done()
+
+    for usage_id, name, bills, replace_series in jobs:
+        await async_import_cost_statistics(
+            hass,
+            usage_statistic_id=usage_id,
+            name=name,
+            bills=bills,
+            full_refresh=data.is_first_refresh,
+            replace_series=replace_series,
+        )

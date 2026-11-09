@@ -263,8 +263,8 @@ async def async_import_all_statistics(
     # Import billed usage/cost for meters without AMI data
     await _import_billed_stats(hass, coordinator)
 
-    # Price the AMI usage series imported above (reads them back from recorder)
-    await _import_ami_cost_stats(hass, coordinator)
+    # Price the AMI usage series imported above, in the background (see there)
+    _schedule_ami_cost_stats(hass, coordinator)
 
     _LOGGER.info("Statistics import complete")
 
@@ -991,6 +991,8 @@ def _single_meter_per_account_fuel(
 COST_REPRICE_WINDOW = timedelta(days=75)
 # Bills averaged for hours not yet covered by a bill.
 RECENT_BILLS_FOR_ESTIMATE = 3
+# hass.data key for the lock serializing cost imports.
+_COST_LOCK_KEY = f"{DOMAIN}_cost_statistics_lock"
 
 
 @dataclass(frozen=True)
@@ -1162,11 +1164,18 @@ async def async_import_cost_statistics(  # noqa: PLR0913
     )
 
 
-async def _import_ami_cost_stats(
+def _schedule_ami_cost_stats(
     hass: HomeAssistant,
     coordinator: NationalGridDataUpdateCoordinator,
-) -> None:
-    """Import cost statistics for each AMI meter's consumption series.
+) -> asyncio.Task[None] | None:
+    """Start a background task pricing each AMI meter's consumption series.
+
+    Cost is computed from usage read back from the recorder, so the task first
+    waits for the recorder to commit the usage just queued. The recorder does
+    not process its queue until Home Assistant has started, while startup waits
+    for every tracked task, so this wait must not happen in the (tracked)
+    statistics import itself: that would stall startup until its timeout.
+    Background tasks are not waited for during startup.
 
     Skips a fuel type when the account has more than one AMI meter of it, like
     the billed series do. Return-to-grid series are not priced.
@@ -1195,17 +1204,37 @@ async def _import_ami_cost_stats(
             jobs.append((interval_id, f"{display} Electric Interval Cost", bills, True))
 
     if not jobs:
-        return
+        return None
 
-    # Usage rows are queued on the recorder; wait so they can be read back.
-    await get_instance(hass).async_block_till_done()
+    task = hass.async_create_background_task(
+        _async_run_cost_jobs(hass, jobs, full_refresh=data.is_first_refresh),
+        f"{DOMAIN} cost statistics import",
+    )
+    coordinator.cost_task = task
+    return task
 
-    for usage_id, name, bills, replace_series in jobs:
-        await async_import_cost_statistics(
-            hass,
-            usage_statistic_id=usage_id,
-            name=name,
-            bills=bills,
-            full_refresh=data.is_first_refresh,
-            replace_series=replace_series,
-        )
+
+async def _async_run_cost_jobs(
+    hass: HomeAssistant,
+    jobs: list[tuple[str, str, list[Bill], bool]],
+    *,
+    full_refresh: bool,
+) -> None:
+    """Wait for the recorder, then import each cost series in turn.
+
+    Runs are serialized so a full refresh and a later incremental refresh
+    never write the same cost series at the same time.
+    """
+    lock: asyncio.Lock = hass.data.setdefault(_COST_LOCK_KEY, asyncio.Lock())
+    async with lock:
+        # Usage rows are queued on the recorder; wait so they can be read back.
+        await get_instance(hass).async_block_till_done()
+        for usage_id, name, bills, replace_series in jobs:
+            await async_import_cost_statistics(
+                hass,
+                usage_statistic_id=usage_id,
+                name=name,
+                bills=bills,
+                full_refresh=full_refresh,
+                replace_series=replace_series,
+            )

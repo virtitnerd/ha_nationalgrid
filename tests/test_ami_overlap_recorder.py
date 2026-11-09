@@ -19,6 +19,8 @@ SERVICE_POINT = "sp001"
 
 
 async def _read_stats(hass):
+    # Cost statistics are imported in a background task
+    await hass.async_block_till_done(wait_background_tasks=True)
     await async_wait_recording_done(hass)
     return await get_instance(hass).async_add_executor_job(
         statistics_during_period,

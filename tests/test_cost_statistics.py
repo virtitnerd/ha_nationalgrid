@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -325,6 +326,7 @@ async def test_import_all_prices_ami_series(mock_get_instance, mock_cost, hass) 
     )
 
     await async_import_all_statistics(hass, coordinator)
+    await hass.async_block_till_done(wait_background_tasks=True)
 
     mock_get_instance.return_value.async_block_till_done.assert_awaited_once()
     calls = {
@@ -366,6 +368,7 @@ async def test_import_all_skips_cost_for_multiple_ami_meters(
     )
 
     await async_import_all_statistics(hass, coordinator)
+    await hass.async_block_till_done(wait_background_tasks=True)
 
     assert caplog.text.count("skipping cost statistics") == 1
     assert "2 Electric meters with AMI" in caplog.text
@@ -386,6 +389,7 @@ async def test_import_all_skips_cost_without_bills(
     coordinator.data.electric_bill_history = {}
 
     await async_import_all_statistics(hass, coordinator)
+    await hass.async_block_till_done(wait_background_tasks=True)
 
     mock_cost.assert_not_awaited()
 
@@ -421,6 +425,7 @@ async def test_cost_series_matches_recorded_usage(hass) -> None:
     # Run twice: rewriting the series must not double count
     for _ in range(2):
         await async_import_all_statistics(hass, coordinator)
+        await hass.async_block_till_done(wait_background_tasks=True)
         coordinator.data.is_first_refresh = False
     await async_wait_recording_done(hass)
 
@@ -434,3 +439,70 @@ async def test_cost_series_matches_recorded_usage(hass) -> None:
     assert meta[COST_ID][1]["unit_of_measurement"] is None
     # 2 kWh at 0.20 + 4 kWh at 0.25
     assert last[COST_ID][0]["sum"] == pytest.approx(1.40)
+
+
+@patch(f"{STATS}.async_import_cost_statistics", new_callable=AsyncMock)
+@patch(f"{STATS}.get_instance")
+async def test_cost_wait_does_not_block_startup(
+    mock_get_instance, mock_cost, hass
+) -> None:
+    """The statistics import never waits on the recorder inside a tracked task.
+
+    During startup the recorder holds its queue until Home Assistant has
+    started, while startup waits for every tracked task. The recorder wait is
+    modeled as a future that only resolves once "started".
+    """
+    recorder_committed = hass.loop.create_future()
+    mock_get_instance.return_value.async_add_executor_job = AsyncMock(return_value={})
+
+    async def wait_for_commit() -> None:
+        await asyncio.shield(recorder_committed)
+
+    mock_get_instance.return_value.async_block_till_done = wait_for_commit
+    coordinator = MagicMock()
+    coordinator.data = _data({"e": _meter("sp1", "Electric")}, is_first_refresh=True)
+
+    # Started the way __init__.py starts it: a tracked task
+    hass.async_create_task(async_import_all_statistics(hass, coordinator))
+    # What bootstrap waits on before marking startup complete
+    async with asyncio.timeout(5):
+        await hass.async_block_till_done()
+    mock_cost.assert_not_awaited()
+
+    # Once started, the recorder commits and the cost import runs
+    recorder_committed.set_result(None)
+    await coordinator.cost_task
+    assert mock_cost.await_count == 1
+    assert mock_cost.await_args.kwargs["full_refresh"] is True
+
+
+async def test_cost_runs_are_serialized(hass) -> None:
+    """Overlapping refreshes write cost series one run at a time."""
+    from custom_components.national_grid_us import statistics
+
+    order: list[str] = []
+    gate = hass.loop.create_future()
+
+    async def fake_import(_hass, *, full_refresh, **_kw):
+        order.append(f"start {full_refresh}")
+        if full_refresh:
+            await gate
+        order.append(f"end {full_refresh}")
+
+    job = [(USAGE_ID, "Cost", BILLS, False)]
+    with (
+        patch(f"{STATS}.get_instance") as mock_get_instance,
+        patch(f"{STATS}.async_import_cost_statistics", side_effect=fake_import),
+    ):
+        mock_get_instance.return_value.async_block_till_done = AsyncMock()
+        first = hass.async_create_background_task(
+            statistics._async_run_cost_jobs(hass, job, full_refresh=True), "first"
+        )
+        second = hass.async_create_background_task(
+            statistics._async_run_cost_jobs(hass, job, full_refresh=False), "second"
+        )
+        await asyncio.sleep(0)
+        gate.set_result(None)
+        await asyncio.gather(first, second)
+
+    assert order == ["start True", "end True", "start False", "end False"]

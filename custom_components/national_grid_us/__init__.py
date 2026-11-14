@@ -339,6 +339,10 @@ async def _async_setup_services(hass: HomeAssistant) -> None:
             # The update listener already started the import; wait for it
             if coordinator.import_task is not None:
                 await coordinator.import_task
+            # Cost statistics are priced in a background task it starts
+            cost_task = coordinator.cost_task
+            if cost_task is not None and not cost_task.done():
+                await cost_task
 
             _LOGGER.info(
                 "Force full refresh completed for account: %s",

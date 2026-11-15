@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Home Assistant custom integration for National Grid, based on the `ludeeus/integration_blueprint` template. It uses the [`py-nationalgrid`](https://github.com/virtitnerd/py-nationalgrid) Python library to access data from National Grid. It uses HACS for distribution and requires Home Assistant 2025.2.4+.
+This is a Home Assistant custom integration for National Grid, based on the `ludeeus/integration_blueprint` template. It uses the [`py-nationalgrid`](https://github.com/virtitnerd/py-nationalgrid) Python library to access data from National Grid. It uses HACS for distribution and requires Home Assistant 2026.11.0+.
 
 ## Development Commands
 

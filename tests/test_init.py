@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -170,6 +171,40 @@ async def test_force_refresh_service_triggers_coordinator(
 
     # One import per service call: the update listener's, which the service awaits
     assert mock_stats.call_count == 1
+
+
+async def test_force_refresh_service_waits_for_cost_import(
+    hass: HomeAssistant, config_entry
+) -> None:
+    """The service returns only after the background cost import finishes."""
+    cost_done = hass.loop.create_future()
+
+    async def finish_cost() -> None:
+        await cost_done
+
+    async def import_stats(_hass, coordinator) -> None:
+        coordinator.cost_task = hass.async_create_background_task(finish_cost(), "cost")
+
+    with (
+        patch(PATCH_CLIENT, return_value=_make_api_mock()),
+        patch(PATCH_SESSION),
+        patch(PATCH_STATISTICS, side_effect=import_stats),
+    ):
+        await hass.config_entries.async_setup(config_entry.entry_id)
+        # Not waiting on background tasks: the cost task is held until below
+        await hass.async_block_till_done()
+
+        from custom_components.national_grid_us.const import DOMAIN
+
+        call = hass.async_create_task(
+            hass.services.async_call(DOMAIN, "force_full_refresh", {}, blocking=True)
+        )
+        for _ in range(20):
+            await asyncio.sleep(0)
+        assert not call.done()
+
+        cost_done.set_result(None)
+        await call
 
 
 async def test_force_refresh_service_with_specific_entry_id(

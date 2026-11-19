@@ -214,12 +214,24 @@ Statistics IDs include the account ID and service point to ensure uniqueness acr
 | `national_grid_us:{account_id}_{sp}_electric_return_hourly_usage`        | Return to grid / solar — verified (kWh)  | All available history |
 | `national_grid_us:{account_id}_{sp}_electric_interval_usage`             | Consumption — near real-time (kWh)       | ~2 days  |
 | `national_grid_us:{account_id}_{sp}_electric_interval_return_usage`      | Return to grid / solar — real-time (kWh) | ~2 days  |
+| `national_grid_us:{account_id}_{sp}_electric_hourly_cost`                | Cost of `..._electric_hourly_usage` (USD) | All available history |
+| `national_grid_us:{account_id}_{sp}_electric_interval_cost`              | Cost of `..._electric_interval_usage` (USD) | ~2 days |
 
 ### Gas Meters
 
 | Statistic ID                                       | Description           | Window   |
 | -------------------------------------------------- | --------------------- | -------- |
 | `national_grid_us:{account_id}_{sp}_gas_hourly_usage` | Gas consumption (thm) | All available history |
+| `national_grid_us:{account_id}_{sp}_gas_hourly_cost`  | Cost of `..._gas_hourly_usage` (USD) | All available history |
+
+### Smart Meter Cost
+
+The Energy dashboard can't apply a static or entity price to external statistics, so each smart-meter consumption series gets a matching `_cost` series. Each hour's usage is multiplied by the blended rate of the bill whose billing period covers it (total charges ÷ billed usage). Hours after your newest bill are priced at the blended rate of your last three bills (the same figure as the **Avg Cost per Unit** sensor) and are repriced once their bill arrives: every refresh rewrites the last 75 days.
+
+- This is a blended rate, not a tariff model. Fixed charges are spread across every kWh or therm, so hourly values are estimates; each billing period's total matches the bill.
+- Return to grid / solar is not priced.
+- Cost is skipped for an account with more than one smart meter of the same fuel, since National Grid reports bill history per account.
+- No cost series is created until at least one bill is available.
 
 ### Meters Without a Smart Meter
 
@@ -247,6 +259,7 @@ Use the cost statistic with **Use an entity tracking the total costs**. Billed s
    - If you have solar/return-to-grid, also add `national_grid_us:{account_id}_{sp}_electric_return_hourly_usage` under **Return to grid**
 3. Under **Gas consumption**, click **Add gas source** and add:
    - `national_grid_us:{account_id}_{sp}_gas_hourly_usage`
+4. To track cost, edit each consumption source, choose **Use an entity tracking the total costs**, and select its matching `_cost` statistic (for example `..._electric_hourly_cost` for `..._electric_hourly_usage`). See [Smart Meter Cost](#smart-meter-cost).
 
 > **Why two electricity sources?** National Grid takes 1–2 days to finalize and publish verified AMI readings. The interval stat bridges that gap with near-real-time data. The integration ensures there is no overlap between them — together they give you a complete, continuous picture with no double-counting.
 

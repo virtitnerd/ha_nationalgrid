@@ -1,6 +1,6 @@
 # pytest-homeassistant pins its own exact Home Assistant version, so CI installs
 # requirements.txt and then this file in separate steps and the test run uses the
 # plugin's Home Assistant. Pinning both in one resolve fails.
-pytest-homeassistant==2026.11.2
+pytest-homeassistant==2026.11.3
 pytest-cov
 py-nationalgrid==0.6.8
